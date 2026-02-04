@@ -1,0 +1,112 @@
+[
+  {
+    "id": "1",
+    "name": "K붕붕",
+    "rank": "군단병",
+    "class": "수호성",
+    "power": 3224,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:08:58.805Z",
+    "clearCount": "0회"
+  },
+  {
+    "id": "1769547808317",
+    "name": "부트띠",
+    "rank": "군단병",
+    "class": "검성",
+    "power": 3400,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:09:03.403Z",
+    "clearCount": "숙련"
+  },
+  {
+    "id": "1769551167421",
+    "name": "기룡",
+    "rank": "군단장",
+    "class": "검성",
+    "power": 3370,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:09:10.382Z",
+    "clearCount": "숙련"
+  },
+  {
+    "id": "1769551177494",
+    "name": "포도잼",
+    "rank": "군단병",
+    "class": "마도성",
+    "power": 3328,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:09:16.389Z",
+    "clearCount": "0회"
+  },
+  {
+    "id": "1769551187235",
+    "name": "딸기잼",
+    "rank": "군단병",
+    "class": "치유성",
+    "power": 3030,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:09:22.522Z",
+    "clearCount": "0회"
+  },
+  {
+    "id": "1769553000299",
+    "name": "청음",
+    "rank": "군단병",
+    "class": "마도성",
+    "power": 3256,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T04:09:28.638Z",
+    "clearCount": "0회"
+  },
+  {
+    "id": "1769553033378",
+    "name": "길뽕",
+    "rank": "군단병",
+    "class": "살성",
+    "power": 2958,
+    "guild": "츄",
+    "isActive": true,
+    "lastUpdated": "2026-01-28T03:52:15.578Z",
+    "clearCount": "0회"
+  },
+  {
+    "id": "1769567960451",
+    "name": "모로아",
+    "rank": "군단병",
+    "class": "호법성",
+    "power": 3287,
+    "guild": "츄",
+    "isActive": true,
+    "clearCount": "0회",
+    "lastUpdated": "2026-01-28T04:09:56.039Z"
+  },
+  {
+    "id": "1769567973400",
+    "name": "청극",
+    "rank": "군단병",
+    "class": "검성",
+    "power": 3188,
+    "guild": "츄",
+    "isActive": true,
+    "clearCount": "0회",
+    "lastUpdated": "2026-01-28T04:10:02.550Z"
+  },
+  {
+    "id": "1769568167136",
+    "name": "가자구",
+    "rank": "군단병",
+    "class": "궁성",
+    "power": 3289,
+    "guild": "츄",
+    "isActive": true,
+    "clearCount": "0회",
+    "lastUpdated": "2026-01-28T04:10:09.615Z"
+  }
+]

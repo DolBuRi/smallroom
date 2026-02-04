@@ -1,0 +1,30 @@
+{
+    "manifest_version": 3,
+    "name": "AION2 Headless Bridge",
+    "version": "3.2",
+    "description": "창을 열지 않고 백그라운드에서 데이터를 수집합니다.",
+    "permissions": [
+        "activeTab",
+        "scripting"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "host_permissions": [
+        "https://aon2.info/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "http://localhost:3005/*",
+                "http://127.0.0.1:3005/*",
+                "https://aon2.info/*",
+                "https://aion2-gm.vercel.app/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ]
+}

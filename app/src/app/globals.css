@@ -1,0 +1,154 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 215 25% 27%;
+  --primary: 245 50% 60%;
+  --primary-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --radius: 1.5rem;
+}
+
+body {
+  /* Softer, more muted background to reduce eye strain */
+  background: #f1f3f6;
+  background-image: radial-gradient(at 0% 0%, rgba(224, 231, 255, 0.5) 0, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(245, 243, 255, 0.5) 0, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(250, 232, 255, 0.5) 0, transparent 50%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  margin: 0;
+  color: #334155;
+  /* Slate 700 - softer than black */
+  font-family: 'Outfit', 'Inter', sans-serif;
+}
+
+.dark body {
+  background: #0f172a;
+  background-image: radial-gradient(at 0% 0%, rgba(30, 41, 59, 0.5) 0, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(15, 23, 42, 0.5) 0, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(30, 41, 59, 0.5) 0, transparent 50%);
+  color: #e2e8f0;
+}
+
+/* Cute but Eye-friendly Glass Effect */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  /* Increased opacity for better readability */
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 1);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.04), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  border-radius: 2rem;
+}
+
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-input {
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  transition: all 0.3s ease;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  outline: none;
+  color: #1e293b;
+}
+
+.dark .glass-input {
+  background: rgba(30, 41, 59, 0.5);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+}
+
+.dark .glass-input:focus {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: #6366f1;
+}
+
+.glass-input:focus {
+  border-color: #818cf8;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.1);
+}
+
+.glass-btn {
+  background: #6366f1;
+  /* Indigo 500 - stable and professional */
+  color: white;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  border-radius: 1.25rem;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+  cursor: pointer;
+}
+
+.glass-btn:hover {
+  background: #4f46e5;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
+}
+
+.glass-btn:active {
+  transform: translateY(0);
+}
+
+.dark .glass-btn {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}

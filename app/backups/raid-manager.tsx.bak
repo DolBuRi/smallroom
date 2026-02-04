@@ -1,0 +1,764 @@
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+    Calendar, Users, Clock, CheckCircle, AlertCircle, Sparkles,
+    Zap, Info, Shield, Heart, Sword,
+    Trash2, X, ClipboardList, ChevronRight, Layers, Target, Activity,
+    LayoutGrid, List as ListIcon, PieChart
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { db } from '@/lib/firebase';
+import { ref, onValue, set, remove } from 'firebase/database';
+import { useAuth } from '@/context/AuthContext';
+
+// --- Interfaces ---
+interface RaidApplication {
+    id: string;
+    nickname: string;
+    class: string;
+    power: number;
+    availability: {
+        [key: string]: string[];
+    };
+    updatedAt: string;
+}
+
+interface MatchingForce {
+    id: string;
+    day: string;
+    timeLabel: string;
+    party1: RaidApplication[];
+    party2: RaidApplication[];
+    isOptimal: boolean;
+    isReserve?: boolean;
+}
+
+const DAYS = ['수', '목', '금', '토', '일', '월', '화'];
+
+const SLOTS = {
+    '평일': [
+        { id: 'wd1', label: '오후 6:30 ~ 8:30' },
+        { id: 'wd2', label: '오후 8:30 ~ 10:30' },
+        { id: 'wd3', label: '오후 10:30 ~ 12:30' }
+    ],
+    '주말': [
+        { id: 'we1', label: '오후 2:00 ~ 4:00' },
+        { id: 'we2', label: '오후 4:00 ~ 6:00' },
+        { id: 'we3', label: '오후 6:30 ~ 8:30' },
+        { id: 'we4', label: '오후 8:30 ~ 10:30' },
+        { id: 'we5', label: '오후 10:30 ~ 12:30' }
+    ]
+};
+
+// --- Helper Components ---
+
+// Helper to get date string (MM/DD) for the current week (Starts Wednesday)
+const getDayDate = (dayString: string) => {
+    const today = new Date();
+    const currentDay = today.getDay(); // Sun=0, Mon=1, Tue=2, Wed=3...
+    // Calculate distance to previous Wednesday (Wed=3)
+    // If today is Wed(3), dist=0. Thu(4), dist=1. ... Tue(2), dist=6.
+    const distToWed = (currentDay + 4) % 7;
+
+    const wednesday = new Date(today);
+    wednesday.setDate(today.getDate() - distToWed);
+
+    // Find index in our custom DAYS array ['수', '목'...]
+    const targetIndex = DAYS.indexOf(dayString);
+    if (targetIndex === -1) return '';
+
+    const targetDate = new Date(wednesday);
+    targetDate.setDate(wednesday.getDate() + targetIndex);
+
+    return `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
+};
+
+const ClassIcon = ({ className }: { className: string }) => {
+    let color = "bg-slate-400 text-white";
+    if (['수호성', '검성'].includes(className)) color = "bg-rose-500 text-white";
+    if (['치유성', '호법성'].includes(className)) color = "bg-emerald-500 text-white";
+    if (['마도성', '정령성'].includes(className)) color = "bg-indigo-500 text-white";
+    if (['살성', '궁성'].includes(className)) color = "bg-amber-500 text-white";
+
+    return (
+        <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shadow-sm shrink-0", color)}>
+            {className.charAt(0)}
+        </div>
+    );
+};
+
+const MemberCard = ({ member, compact = false }: { member: RaidApplication, compact?: boolean }) => (
+    <div className={cn(
+        "flex items-center justify-between bg-white border border-slate-100 rounded-lg shadow-sm transition-all hover:shadow-md",
+        compact ? "p-2 px-3" : "p-3 px-4"
+    )}>
+        <div className="flex items-center gap-3">
+            <ClassIcon className={member.class} />
+            <div className="flex flex-col">
+                <span className={cn("font-bold text-slate-700 leading-none", compact ? "text-xs" : "text-sm")}>
+                    {member.nickname}
+                </span>
+                {!compact && <span className="text-[10px] text-slate-400 mt-0.5">{member.class}</span>}
+            </div>
+        </div>
+        <div className="text-right">
+            <span className={cn("font-black text-slate-900", compact ? "text-xs" : "text-sm")}>
+                {member.power.toLocaleString()}
+            </span>
+            {!compact && <span className="text-[10px] text-slate-400 block -mt-0.5">CP</span>}
+        </div>
+    </div>
+);
+
+// --- Main Component ---
+
+export default function RaidManager() {
+    const { isAdmin } = useAuth();
+
+    // Data States
+    const [applications, setApplications] = useState<RaidApplication[]>([]);
+    const [matchedForces, setMatchedForces] = useState<MatchingForce[]>([]);
+    const [unassignedMembers, setUnassignedMembers] = useState<RaidApplication[]>([]); // For future generic unassigned pool
+    const [isLoading, setIsLoading] = useState(true);
+
+    // UI States
+    const [selectedDay, setSelectedDay] = useState('전체');
+    const [viewMode, setViewMode] = useState<'overview' | 'matching'>('overview');
+    const [overviewViewMode, setOverviewViewMode] = useState<'slots' | 'list'>('slots');
+    const [waitingViewMode, setWaitingViewMode] = useState<'day' | 'list'>('day');
+    const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+
+    // Initial Data Sync
+    useEffect(() => {
+        const unsubscribeApps = onValue(ref(db, 'raid_applications'), (snapshot) => {
+            const data = snapshot.val();
+            setApplications(data ? Object.values(data) : []);
+            setIsLoading(false);
+        });
+
+        const unsubscribeForces = onValue(ref(db, 'raid_matched_forces'), (snapshot) => {
+            const data = snapshot.val();
+            setMatchedForces(data || []);
+        });
+
+        const unsubscribeUnassigned = onValue(ref(db, 'raid_unassigned_members'), (snapshot) => {
+            const data = snapshot.val();
+            setUnassignedMembers(data || []);
+        });
+
+        return () => {
+            unsubscribeApps();
+            unsubscribeUnassigned();
+            unsubscribeForces();
+        };
+    }, []);
+
+    // Derived Data
+    const isWeekend = ['토', '일'].includes(selectedDay);
+    const daySlots = isWeekend ? SLOTS['주말'] : SLOTS['평일'];
+
+    const dayApplicants = useMemo(() => {
+        if (selectedDay === '전체') {
+            return applications.sort((a, b) => b.power - a.power);
+        }
+        return applications
+            .filter(app => app.availability?.[selectedDay]?.length > 0)
+            .sort((a, b) => b.power - a.power);
+    }, [applications, selectedDay]);
+
+    // Filter matched forces by day
+    const activeForces = useMemo(() => {
+        if (selectedDay === '전체') return matchedForces.sort((a, b) => {
+            const days = ['월', '화', '수', '목', '금', '토', '일'];
+            const dayDiff = days.indexOf(a.day) - days.indexOf(b.day);
+            if (dayDiff !== 0) return dayDiff;
+            return a.timeLabel.localeCompare(b.timeLabel);
+        });
+        return matchedForces.filter(f => f.day === selectedDay);
+    }, [matchedForces, selectedDay]);
+
+    // Actions
+    // --- Scarcity-First Engine (v19.42) - Global Optimization ---
+    const handleAutoMatch = () => {
+        if (!isAdmin) return alert("관리자만 매칭을 실행할 수 있습니다.");
+        if (applications.length === 0) return alert('신청자가 없습니다.');
+
+        // Simulation for Confirmation
+        const tempForces: MatchingForce[] = [];
+        const assignedIds = new Set<string>();
+        let availableApps = [...applications];
+        let forceGlobalIndex = 1;
+
+        // Loop until no more valid forces can be formed anywhere
+        while (true) {
+            // 1. Build Matrix for Current Available Pool
+            // Map: SlotID -> { applicants: [], tanks: [], clerics: [], dps: [] }
+            const matrix: Record<string, { all: RaidApplication[], tanks: RaidApplication[], clerics: RaidApplication[], dps: RaidApplication[] }> = {};
+            let hasValidSlot = false;
+
+            // Re-scan availability for remaining users
+            availableApps.forEach(app => {
+                if (!app.availability) return;
+                Object.entries(app.availability).forEach(([day, slots]) => {
+                    if (!slots) return;
+                    slots.forEach(slotId => {
+                        const key = `${day}|${slotId}`;
+                        if (!matrix[key]) matrix[key] = { all: [], tanks: [], clerics: [], dps: [] };
+
+                        matrix[key].all.push(app);
+                        if (['수호성', '검성'].includes(app.class)) matrix[key].tanks.push(app);
+                        else if (['치유성'].includes(app.class)) matrix[key].clerics.push(app);
+                        else matrix[key].dps.push(app);
+                    });
+                });
+            });
+
+            // 2. Identify "Most Fragile" Slot
+            // We want to process the slot that is "Hardest to Fill" first.
+            // Fragility Metric: Fewest Potential Forces.
+            let bestKey = '';
+            let minPotentialForces = Infinity;
+
+            Object.entries(matrix).forEach(([key, pool]) => {
+                const possibleByClerics = Math.floor(pool.clerics.length / 2);
+                const possibleByTanks = pool.tanks.length; // Need 1 Tank per force
+                const possibleByHeadcount = Math.floor(pool.all.length / 8);
+
+                const potentialForces = Math.min(possibleByClerics, possibleByTanks, possibleByHeadcount);
+
+                if (potentialForces > 0) {
+                    hasValidSlot = true;
+                    // Scarcity Priority: Smaller potential gets processed FIRST
+                    // If tied, pick the one with fewer total Clerics (save the scarce resource)
+                    if (potentialForces < minPotentialForces) {
+                        minPotentialForces = potentialForces;
+                        bestKey = key;
+                    } else if (potentialForces === minPotentialForces) {
+                        // Tie-breaker: Smaller Cleric pool = More fragile
+                        const currentBestClerics = matrix[bestKey]?.clerics.length || Infinity;
+                        if (pool.clerics.length < currentBestClerics) {
+                            bestKey = key;
+                        }
+                    }
+                }
+            });
+
+            // Break if no slot can form a force
+            if (!hasValidSlot || !bestKey) break;
+
+            // 3. Form ONE Force for the Most Fragile Slot
+            // By doing 1 at a time and re-scanning, we ensure we always target the *current* bottleneck.
+            const targetPool = matrix[bestKey];
+            const [bestDay, bestSlotId] = bestKey.split('|');
+            const isWk = ['토', '일'].includes(bestDay);
+            const slotLabel = (isWk ? SLOTS['주말'] : SLOTS['평일']).find(s => s.id === bestSlotId)?.label || '시간 미정';
+
+            const forceId = `force-${Date.now()}-${forceGlobalIndex}`;
+            const party1: RaidApplication[] = [];
+            const party2: RaidApplication[] = [];
+
+            // Sort Specialists (High Power First)
+            const sortedTanks = [...targetPool.tanks].sort((a, b) => b.power - a.power);
+            const sortedClerics = [...targetPool.clerics].sort((a, b) => b.power - a.power);
+            const sortedDPS = [...targetPool.dps].sort((a, b) => b.power - a.power);
+
+            // Anchor: 1 Tank (Main) to P1, Try Subtank to P2
+            if (sortedTanks.length > 0) { const t = sortedTanks.shift()!; party1.push(t); assignedIds.add(t.id); }
+            if (sortedTanks.length > 0) { const t = sortedTanks.shift()!; party2.push(t); assignedIds.add(t.id); }
+
+            // Anchor: 2 Clerics (1 per Party) - MANDATORY
+            if (sortedClerics.length > 0) { const c = sortedClerics.shift()!; party1.push(c); assignedIds.add(c.id); }
+            if (sortedClerics.length > 0) { const c = sortedClerics.shift()!; party2.push(c); assignedIds.add(c.id); }
+
+            // Fill: Snake Draft
+            while (party1.length < 4 && sortedDPS.length > 0) { const d = sortedDPS.shift()!; party1.push(d); assignedIds.add(d.id); }
+            while (party2.length < 4 && sortedDPS.length > 0) { const d = sortedDPS.shift()!; party2.push(d); assignedIds.add(d.id); }
+
+            tempForces.push({
+                id: forceId,
+                day: bestDay,
+                timeLabel: slotLabel,
+                party1,
+                party2,
+                isOptimal: true,
+                isReserve: false
+            });
+            forceGlobalIndex++;
+
+            // 4. Update Global Pool (Performance: Re-filter availableApps)
+            availableApps = availableApps.filter(app => !assignedIds.has(app.id));
+        }
+
+        // 5. Confirmation & Saving
+        if (tempForces.length === 0) return alert("조건(2치유/1탱/8인)을 만족하는 포스를 구성할 수 없습니다.");
+
+        // Skip Confirmation as requested
+        // 6. Finalize
+        const leftovers = applications.filter(app => !assignedIds.has(app.id));
+        set(ref(db, 'raid_matched_forces'), tempForces);
+        set(ref(db, 'raid_unassigned_members'), leftovers);
+        setSelectedDay('전체');
+        setViewMode('matching');
+    };
+
+    const handleResetAll = async () => {
+        if (!isAdmin) return alert("관리자 권한이 필요합니다.");
+        if (!confirm("모든 신청 및 매칭 데이터를 초기화하시겠습니까?\n(매주 수요일 리셋 권장)")) return;
+
+        try {
+            await remove(ref(db, 'raid_applications'));
+            await remove(ref(db, 'raid_matched_forces'));
+            alert("전체 초기화 완료");
+        } catch (e) {
+            console.error(e);
+            alert("초기화 실패");
+        }
+    };
+
+    const handleDisband = (id: string) => {
+        if (!isAdmin) return alert("관리자 권한이 필요합니다.");
+        if (!confirm("이 포스를 해체하시겠습니까?")) return;
+        const nextForces = matchedForces.filter(f => f.id !== id);
+        set(ref(db, 'raid_matched_forces'), nextForces);
+    };
+
+    const generateDummyData = async () => {
+        if (!isAdmin) return;
+        if (!confirm("테스트용 더미 데이터 100개를 생성하시겠습니까?\n(기존 데이터와 섞일 수 있습니다)")) return;
+
+        const classes = ['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
+        const slots平日 = ['wd1', 'wd2', 'wd3'];
+        const slots週末 = ['we1', 'we2', 'we3', 'we4', 'we5'];
+        const dummyData: Record<string, any> = {};
+
+        for (let i = 1; i <= 100; i++) {
+            const id = `dummy_${Date.now()}_${i}`;
+            const cls = classes[Math.floor(Math.random() * classes.length)];
+            const power = Math.floor(Math.random() * (5500 - 1500) + 1500);
+
+            const availability: Record<string, string[]> = {
+                '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': []
+            };
+
+            // Random availability patterns
+            const pattern = Math.random();
+            if (pattern < 0.3) { // Hardcore (Almost every day)
+                ['월', '화', '수', '목', '금'].forEach(d => availability[d] = [...slots平日]);
+                ['토', '일'].forEach(d => availability[d] = [...slots週末]);
+            } else if (pattern < 0.6) { // Evening warrior (Weeknights)
+                ['월', '화', '수', '목', '금'].forEach(d => {
+                    if (Math.random() > 0.3) availability[d] = ['wd2', 'wd3'];
+                });
+            } else { // Weekend warrior
+                ['토', '일'].forEach(d => {
+                    if (Math.random() > 0.2) availability[d] = slots週末.filter(() => Math.random() > 0.4);
+                });
+            }
+
+            dummyData[id] = {
+                id,
+                nickname: `TestUser${i}`,
+                class: cls,
+                power,
+                availability,
+                updatedAt: new Date().toISOString()
+            };
+        }
+
+        try {
+            await set(ref(db, 'raid_applications'), dummyData);
+            alert("더미 데이터 100개 생성 완료!");
+        } catch (e) {
+            console.error(e);
+            alert("생성 실패");
+        }
+    };
+
+    // --- Renderers ---
+
+
+
+    return (
+        <div className="space-y-6 pb-20 animate-in fade-in duration-500">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                <div>
+                    <h2 className="text-3xl font-black text-slate-900 flex items-center gap-3 tracking-tight">
+                        <Sword className="text-indigo-500" size={32} />
+                        성역 파티 도우미
+                    </h2>
+                    <p className="text-slate-500 text-sm font-medium mt-2">
+                        신청 현황을 확인하고 알고리즘을 통해 최적의 성역 파티 매칭을 실행합니다.
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    {isAdmin && (
+                        <button
+                            onClick={generateDummyData}
+                            className="px-4 py-2 bg-indigo-50 text-indigo-500 rounded-xl text-xs font-black hover:bg-indigo-100 transition-colors flex items-center gap-2 border border-indigo-100 shadow-sm"
+                        >
+                            <Sparkles size={14} /> [Test] 더미생성
+                        </button>
+                    )}
+                    <button
+                        onClick={() => {
+                            if (!isAdmin) {
+                                alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                return;
+                            }
+                            handleResetAll();
+                        }}
+                        className={cn(
+                            "px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 border shadow-sm",
+                            isAdmin
+                                ? "bg-red-50 text-red-500 hover:bg-red-100 border-red-100"
+                                : "bg-slate-50 text-slate-400 cursor-not-allowed border-slate-100 opacity-60"
+                        )}
+                    >
+                        <Trash2 size={14} /> [관리자] 전체 데이터 초기화
+                    </button>
+                </div>
+            </div>
+
+            {/* Controls */}
+            <div className="glass-panel p-2 flex flex-col md:flex-row items-center justify-between gap-4">
+                {/* Day Tabs */}
+                <div className="flex p-1 bg-slate-100/50 rounded-xl overflow-x-auto max-w-full">
+                    {['전체', ...DAYS].map((day) => (
+                        <button
+                            key={day}
+                            onClick={() => setSelectedDay(day)}
+                            className={cn(
+                                "px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                                selectedDay === day ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                            )}
+                        >
+                            {day}
+                            {day !== '전체' && (
+                                <span className="ml-1 text-xs opacity-80">
+                                    요일
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+
+                {/* View Toggles */}
+                <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-xl">
+                    <button
+                        onClick={() => setViewMode('overview')}
+                        className={cn(
+                            "px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all",
+                            viewMode === 'overview' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400"
+                        )}
+                    >
+                        <ClipboardList size={14} /> 신청 현황 ({dayApplicants.length})
+                    </button>
+                    <button
+                        onClick={() => setViewMode('matching')}
+                        className={cn(
+                            "px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all",
+                            viewMode === 'matching' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400"
+                        )}
+                    >
+                        <Users size={14} /> 매칭 결과 ({activeForces.length})
+                    </button>
+                </div>
+            </div>
+
+            {/* Content Area */}
+            {viewMode === 'overview' && (
+                <div className="space-y-6">
+                    {/* View Sub-toggles */}
+                    <div className="flex justify-between items-center">
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setOverviewViewMode('slots')}
+                                className={cn("p-2 rounded-lg transition-colors", overviewViewMode === 'slots' ? "bg-indigo-50 text-indigo-600" : "text-slate-400 hover:bg-slate-50")}
+                            >
+                                <LayoutGrid size={18} />
+                            </button>
+                            <button
+                                onClick={() => setOverviewViewMode('list')}
+                                className={cn("p-2 rounded-lg transition-colors", overviewViewMode === 'list' ? "bg-indigo-50 text-indigo-600" : "text-slate-400 hover:bg-slate-50")}
+                            >
+                                <ListIcon size={18} />
+                            </button>
+                        </div>
+                        <button
+                            onClick={handleAutoMatch}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2"
+                        >
+                            <Sparkles size={16} /> 자동 매칭 실행
+                        </button>
+                    </div>
+
+                    {/* SLOTS VIEW */}
+                    {overviewViewMode === 'slots' ? (
+
+                        <div className="space-y-8">
+                            {(selectedDay === '전체' ? DAYS : [selectedDay]).map(day => {
+                                const isWknd = ['토', '일'].includes(day);
+                                const currentSlots = isWknd ? SLOTS['주말'] : SLOTS['평일'];
+
+                                // Optional: Skip days with no applicants if viewing 'All'? 
+                                // For now, let's show headers for clarity or maybe hide empty days if lists get too long.
+                                // Let's simplify: Display the header then the grid of slots.
+
+                                return (
+                                    <div key={day} className="space-y-4">
+                                        <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest pl-2 border-l-4 border-slate-200">
+                                            {day}요일 <span className="text-slate-400 font-normal">({getDayDate(day)})</span>
+                                        </h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {currentSlots.map(slot => {
+                                                const slotApps = dayApplicants.filter(app => app.availability?.[day]?.includes(slot.id));
+                                                return (
+                                                    <div key={slot.id} className="glass-panel p-5 flex flex-col gap-4">
+                                                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="bg-indigo-50 text-indigo-600 p-1.5 rounded-lg">
+                                                                    <Clock size={16} />
+                                                                </div>
+                                                                <span className="font-bold text-slate-700">{slot.label}</span>
+                                                            </div>
+                                                            <span className="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-black">
+                                                                {slotApps.length}명
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="min-h-[120px] max-h-[320px] overflow-y-auto custom-scrollbar pr-2">
+                                                            {slotApps.length > 0 ? (
+                                                                <div className="space-y-2">
+                                                                    {slotApps.map(app => (
+                                                                        <MemberCard key={app.id} member={app} compact />
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-2 min-h-[120px]">
+                                                                    <Users size={24} className="opacity-50" />
+                                                                    <span className="text-xs font-bold">신청자가 없습니다</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        /* LIST VIEW */
+                        <div className="glass-panel p-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {dayApplicants.map(app => (
+                                    <MemberCard key={app.id} member={app} />
+                                ))}
+                                {dayApplicants.length === 0 && (
+                                    <div className="col-span-full text-center py-20 text-slate-300">신청 내역이 없습니다.</div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {viewMode === 'matching' && (
+                <div className="space-y-8">
+                    {activeForces.length === 0 && (
+                        <div className="text-center py-20">
+                            <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Layers className="text-slate-300" size={40} />
+                            </div>
+                            <h3 className="text-xl font-black text-slate-900 mb-2">매칭된 성역 포스가 없습니다</h3>
+
+                        </div>
+                    )}
+
+                    {activeForces.length > 0 && (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                            {activeForces.map((force, idx) => (
+                                <div key={force.id} className={cn(
+                                    "glass-panel p-6 border-l-[4px] relative transition-all hover:shadow-lg",
+                                    force.isOptimal ? "border-l-indigo-600" : "border-l-amber-500"
+                                )}>
+                                    {/* Force Header */}
+                                    <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-3 border-b border-slate-100 pb-4">
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                                                    {force.isReserve ? '예비 포스' : `성역 제 ${idx + 1}포스`}
+                                                </h3>
+                                                <span className={cn(
+                                                    "px-2 py-0.5 rounded text-[11px] font-bold tracking-tight",
+                                                    force.isOptimal ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700"
+                                                )}>
+                                                    {force.isOptimal ? '최적' : '예비'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-slate-600 font-bold text-xs">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Calendar size={14} />
+                                                    <span className="text-slate-900">
+                                                        {force.day}요일 <span className="text-slate-500 font-normal">({getDayDate(force.day)})</span>
+                                                    </span>
+                                                </div>
+                                                <div className="w-[1px] h-3 bg-slate-300"></div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Clock size={14} />
+                                                    <span>{force.timeLabel}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-right">
+                                                <span className="text-[11px] font-bold text-slate-400 block mb-0.5">총 평균</span>
+                                                <span className="text-xl font-black text-slate-900 tabular-nums leading-none">
+                                                    {Math.round((force.party1.reduce((s, m) => s + m.power, 0) + force.party2.reduce((s, m) => s + m.power, 0)) / (force.party1.length + force.party2.length || 1)).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            {isAdmin && (
+                                                <button onClick={() => handleDisband(force.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors">
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Parties */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        {/* Party 1 */}
+                                        <div className="bg-slate-50/50 rounded-lg p-3 border border-slate-100/50">
+                                            <div className="flex items-center justify-between text-xs font-bold text-slate-500 mb-2 px-1">
+                                                <span className="text-indigo-600">1파티</span>
+                                                <span>평균: {Math.round(force.party1.reduce((s, m) => s + m.power, 0) / force.party1.length || 0).toLocaleString()}</span>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                {force.party1.map(m => <MemberCard key={m.id} member={m} compact />)}
+                                            </div>
+                                        </div>
+
+                                        {/* Party 2 */}
+                                        <div className="bg-slate-50/50 rounded-lg p-3 border border-slate-100/50">
+                                            <div className="flex items-center justify-between text-xs font-bold text-slate-500 mb-2 px-1">
+                                                <span className="text-indigo-600">2파티</span>
+                                                <span>평균: {Math.round(force.party2.reduce((s, m) => s + m.power, 0) / force.party2.length || 0).toLocaleString()}</span>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                {force.party2.map(m => <MemberCard key={m.id} member={m} compact />)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                    }
+
+                    {/* Unassigned / Waiting List */}
+                    {/* Unassigned / Waiting List */}
+                    {
+                        unassignedMembers.length > 0 && (
+                            <div className="mt-8 border-t border-slate-200 pt-6 animate-in slide-in-from-bottom-5 duration-700 delay-200">
+                                {/* Header & Tabs */}
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                                    <div className="flex items-center gap-2 opacity-90">
+                                        <h3 className="text-sm font-black text-slate-600 flex items-center gap-2">
+                                            <AlertCircle size={16} /> 대기 인원
+                                        </h3>
+                                        <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[11px] font-bold">
+                                            {unassignedMembers.length}명
+                                        </span>
+                                    </div>
+                                    <div className="flex bg-slate-100 p-1 rounded-lg self-start md:self-auto">
+                                        <button
+                                            onClick={() => setWaitingViewMode('day')}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-md text-xs font-bold transition-all",
+                                                waitingViewMode === 'day' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                            )}
+                                        >
+                                            요일별 보기
+                                        </button>
+                                        <button
+                                            onClick={() => setWaitingViewMode('list')}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-md text-xs font-bold transition-all",
+                                                waitingViewMode === 'list' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                            )}
+                                        >
+                                            전체 명단
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* View Content */}
+                                {waitingViewMode === 'list' ? (
+                                    // List View: Show All
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                                        {unassignedMembers.map(member => (
+                                            <div key={member.id} className="opacity-75 hover:opacity-100 transition-opacity">
+                                                <MemberCard member={member} compact />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    // Day/Slot View
+                                    <div className="space-y-8">
+                                        {(selectedDay === '전체' ? DAYS : [selectedDay]).map(day => {
+                                            const isWknd = ['토', '일'].includes(day);
+                                            const currentSlots = isWknd ? SLOTS['주말'] : SLOTS['평일'];
+
+                                            // Check if this day has ANY waiting members in any slot
+                                            const hasAnyWaiters = currentSlots.some(slot =>
+                                                unassignedMembers.some(m => m.availability?.[day]?.includes(slot.id))
+                                            );
+
+                                            if (!hasAnyWaiters) return null;
+
+                                            return (
+                                                <div key={day} className="space-y-4">
+                                                    <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest pl-2 border-l-4 border-slate-200">
+                                                        {day}요일 <span className="text-slate-400 font-normal">({getDayDate(day)})</span>
+                                                    </h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                                        {currentSlots.map(slot => {
+                                                            const slotWaiters = unassignedMembers.filter(m => m.availability?.[day]?.includes(slot.id));
+                                                            if (slotWaiters.length === 0) return null;
+
+                                                            return (
+                                                                <div key={slot.id} className="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                                                                    <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200/50">
+                                                                        <span className="text-xs font-bold text-slate-500">{slot.label}</span>
+                                                                        <span className="bg-white text-indigo-600 px-1.5 py-0.5 rounded text-[10px] font-black border border-indigo-100">
+                                                                            {slotWaiters.length}명
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+                                                                        {slotWaiters.map(member => (
+                                                                            <MemberCard key={`${day}-${slot.id}-${member.id}`} member={member} compact />
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    }
+                </div>
+            )}
+        </div>
+    );
+}
+

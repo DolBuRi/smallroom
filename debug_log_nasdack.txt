@@ -1,0 +1,15 @@
+[DEBUG START] 2026-01-28T20:26:41.171Z
+
+🔍 [Diagnosing] '나스닥' on Server 1006...
+1. Go to aion2tool.com
+✅ Selected Elyos
+✅ Selected Server 1006
+✅ Search executed
+⏳ Waiting for results...
+
+--- RESULTS ---
+Power Element Text: 3,354
+Score Element Text: 46,843
+Regex Matches for Score: ["점수: 55,168"]
+
+[Done]
