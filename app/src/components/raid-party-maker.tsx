@@ -53,16 +53,16 @@ interface Party {
 
 // --- Constants & Helpers ---
 const WEEKDAY_SLOTS = [
-    { id: 'wd1', label: '18:30', fullLabel: '18:30 ~ 20:30' },
-    { id: 'wd2', label: '20:30', fullLabel: '20:30 ~ 22:30' },
-    { id: 'wd3', label: '22:30', fullLabel: '22:30 ~ 00:30' },
+    { id: 'wd1', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
+    { id: 'wd2', label: '오후 8:30', fullLabel: '20:30 ~ 22:30', sortKey: 2030 },
+    { id: 'wd3', label: '오후 10:30', fullLabel: '22:30 ~ 00:30', sortKey: 2230 },
 ];
 const WEEKEND_SLOTS = [
-    { id: 'we1', label: '14:00', fullLabel: '14:00 ~ 16:00' },
-    { id: 'we2', label: '16:00', fullLabel: '16:00 ~ 18:00' },
-    { id: 'we3', label: '18:30', fullLabel: '18:30 ~ 20:30' },
-    { id: 'we4', label: '20:30', fullLabel: '20:30 ~ 22:30' },
-    { id: 'we5', label: '22:30', fullLabel: '22:30 ~ 00:30' },
+    { id: 'we1', label: '오후 2:00', fullLabel: '14:00 ~ 16:00', sortKey: 1400 },
+    { id: 'we2', label: '오후 4:00', fullLabel: '16:00 ~ 18:00', sortKey: 1600 },
+    { id: 'we3', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
+    { id: 'we4', label: '오후 8:30', fullLabel: '20:30 ~ 22:30', sortKey: 2030 },
+    { id: 'we5', label: '오후 10:30', fullLabel: '22:30 ~ 00:30', sortKey: 2230 },
 ];
 
 // User requested order: Wed start
@@ -544,20 +544,39 @@ export default function RaidPartyMaker() {
                                                 visibleSlots = WEEKDAY_SLOTS;
                                             }
 
-                                            return visibleSlots.map(s => (
-                                                <button
-                                                    key={s.id}
-                                                    onClick={() => setSelectedSlot(s.id)}
-                                                    className={cn(
-                                                        "w-full h-9 text-xs font-bold transition-all border flex items-center justify-center",
-                                                        selectedSlot === s.id
-                                                            ? "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700"
-                                                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-                                                    )}
-                                                >
-                                                    {s.label}
-                                                </button>
-                                            ));
+                                            return visibleSlots.map(s => {
+                                                // Check availability count for this slot
+                                                const availableCount = pool.filter(m =>
+                                                    m.availability?.[selectedDay]?.includes(s.id)
+                                                ).length;
+                                                const isDisabled = availableCount === 0;
+
+                                                return (
+                                                    <div key={s.id} className="relative group w-full">
+                                                        <button
+                                                            onClick={() => !isDisabled && setSelectedSlot(s.id)}
+                                                            className={cn(
+                                                                "w-full h-9 text-xs font-bold transition-all border flex items-center justify-center",
+                                                                isDisabled
+                                                                    ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed dark:bg-slate-800/50 dark:text-slate-600 dark:border-slate-800"
+                                                                    : selectedSlot === s.id
+                                                                        ? "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700"
+                                                                        : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                                            )}
+                                                        >
+                                                            {s.label}
+                                                        </button>
+                                                        {/* Custom Tooltip */}
+                                                        {isDisabled && (
+                                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[150px] px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 whitespace-pre-wrap text-center">
+                                                                해당 시간대에<br />신청자가 없습니다.
+                                                                {/* Triangle Arrow */}
+                                                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            });
                                         })()}
                                     </div>
                                 </>
