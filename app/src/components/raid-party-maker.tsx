@@ -138,6 +138,17 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
         { id: 'class_balance', label: '클래스 조합 고려', desc: '파티 내 클래스 중복을 최소화합니다.', active: false },
     ]);
 
+    // Tooltip State
+    const [tooltipInfo, setTooltipInfo] = useState<{ member: Member, rect: DOMRect } | null>(null);
+
+    const handleShowTooltip = (member: Member, rect: DOMRect) => {
+        setTooltipInfo({ member, rect });
+    };
+
+    const handleHideTooltip = () => {
+        setTooltipInfo(null);
+    };
+
 
     // --- Effects ---
     // Close color picker when group changes
@@ -382,6 +393,10 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
 
     // --- Handlers ---
     const handleDragStart = (event: DragStartEvent) => {
+        if (selectedDay === 'ALL' || !selectedSlot) {
+            alert("전체 보기 또는 시간 전체 상태에서는 파티를 편성할 수 없습니다.\n먼저 특정 요일과 시간을 선택해주세요.");
+            return;
+        }
         const member = allMembers.find(m => m.id === event.active.id);
         if (member) setDraggedMember(member);
     };
@@ -403,12 +418,49 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
         const sourceId = findContainer(memberId);
         if (sourceId === targetId) return;
 
+        const member = allMembers.find(m => m.id === memberId);
+        if (!member) return;
+
         // Validation: Time Conflict
         if (targetId !== 'pool') {
             const targetParty = parties.find(p => p.id === targetId);
             if (targetParty && targetParty.assignedDay && targetParty.assignedTime) {
-                const member = allMembers.find(m => m.id === memberId);
-                if (member && (!member.availability?.[targetParty.assignedDay]?.includes(targetParty.assignedTime))) {
+                // 1. Fixed Group Smart Check
+                if (member.fixedGroupId) {
+                    const groupMembers = allMembers.filter(m => m.fixedGroupId === member.fixedGroupId && m.id !== member.id);
+                    // Filter only those who applied (exist in allMembers implies they applied/are in pool context if filtered correctly, 
+                    // but allMembers here seems to be the full list including pool and parties. 
+                    // Actually 'allMembers' is prop passed from parent, usually only applicants.
+
+                    if (groupMembers.length > 0) {
+                        // Calculate Intersection of Availability for ALL group members (including self)
+                        const allGroupMembers = [member, ...groupMembers];
+                        const commonSlots = allGroupMembers.reduce((acc, m) => {
+                            const mSlots = m.availability?.[targetParty.assignedDay!] || []; // Type assertion: we know assignedDay exists
+                            if (acc === null) return mSlots;
+                            return acc.filter(s => mSlots.includes(s));
+                        }, null as string[] | null) || [];
+
+                        // If target slot is NOT a common slot, but common slots exist
+                        if (!commonSlots.includes(targetParty.assignedTime) && commonSlots.length > 0) {
+                            const recommendedLabel = `${targetParty.assignedDay} ${getSlotLabel(commonSlots[0])}`; // Show first common slot
+
+                            setConfirmationModal({
+                                isOpen: true,
+                                message: `고정 파티 '${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}' 멤버 전원이\n[${recommendedLabel}]에 참여 가능합니다.\n\n현재 선택한 ${targetParty.assignedDay} ${getSlotLabel(targetParty.assignedTime)}에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                onConfirm: () => {
+                                    executeMove(memberId, targetId);
+                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                },
+                                onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                            });
+                            return;
+                        }
+                    }
+                }
+
+                // 2. Individual Availability Check (Existing Logic)
+                if ((!member.availability?.[targetParty.assignedDay]?.includes(targetParty.assignedTime))) {
                     setConfirmationModal({
                         isOpen: true,
                         message: `${member.name}님은 해당 시간(${targetParty.assignedDay} ${getSlotLabel(targetParty.assignedTime)})에 신청하지 않았습니다.\n강제 배정하시겠습니까?`,
@@ -838,7 +890,14 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
                         </div>
                     </div>
 
-                    <PoolContainer id="pool" members={sortedPool} fixedGroups={fixedGroups} isReadOnly={selectedDay === 'ALL'} />
+                    <PoolContainer
+                        id="pool"
+                        members={sortedPool}
+                        fixedGroups={fixedGroups}
+                        isReadOnly={selectedDay === 'ALL'}
+                        onShowTooltip={handleShowTooltip}
+                        onHideTooltip={handleHideTooltip}
+                    />
                 </div>
 
                 {/* 2. Right: Party Canvas */}
@@ -854,10 +913,58 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
                             </button>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-4">
-                        {parties.map((party, idx) => (
-                            <PartySlot key={party.id} party={party} index={idx} fixedGroups={fixedGroups} />
-                        ))}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                        {Array.from({ length: Math.ceil(parties.length / 2) }).map((_, forceIndex) => {
+                            const forceNumber = forceIndex + 1;
+                            const party1 = parties[forceIndex * 2];
+                            const party2 = parties[forceIndex * 2 + 1];
+
+                            // Header Time Display (heuristic: use P1's time if set)
+                            const forceDay = party1?.assignedDay;
+                            const forceTime = party1?.assignedTime;
+
+                            // Helper to get date string (MM/DD)
+                            const getNextDate = (dayName: string) => {
+                                const today = new Date();
+                                const currentDay = today.getDay(); // 0(Sun) ~ 6(Sat)
+                                const dayMap: Record<string, number> = { '일': 0, '월': 1, '화': 2, '수': 3, '목': 4, '금': 5, '토': 6 };
+                                const targetDay = dayMap[dayName];
+
+                                let diff = targetDay - currentDay;
+                                if (diff < 0) diff += 7; // Next week if passed
+                                // If today is the day, show today's date? Or next week? Assume today if same day.
+
+                                const targetDate = new Date(today);
+                                targetDate.setDate(today.getDate() + diff);
+                                return `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
+                            };
+
+                            const forceTimeLabel = forceDay && forceTime
+                                ? `${forceDay}(${getNextDate(forceDay)}) ${getSlotLabel(forceTime)}`
+                                : "시간 미정";
+
+                            return (
+                                <div key={`force-${forceNumber}`} className="bg-white/40 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 overflow-hidden">
+                                    {/* Force Header */}
+                                    <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-100/50 dark:bg-slate-800/80">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-black text-slate-700 dark:text-slate-200">{forceNumber} 포스</span>
+                                            {forceDay && forceTime && (
+                                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700 font-bold flex items-center gap-1">
+                                                    <Clock size={10} /> {forceTimeLabel}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Parties Grid (2 items) */}
+                                    <div className="p-4 grid grid-cols-2 gap-4">
+                                        {party1 && <PartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} />}
+                                        {party2 && <PartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} />}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -1247,6 +1354,14 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
                 </div>
             )}
 
+            {tooltipInfo && (
+                <MemberDetailTooltip
+                    member={tooltipInfo.member}
+                    rect={tooltipInfo.rect}
+                    fixedGroups={fixedGroups}
+                    allMembers={allMembers}
+                />
+            )}
         </DndContext>
     );
 }
@@ -1283,7 +1398,7 @@ function SortableAlgoCard({ card, onToggle }: { card: AlgoCard, onToggle: () => 
     );
 }
 
-function PoolContainer({ id, members, fixedGroups, isReadOnly }: { id: string, members: Member[], fixedGroups?: FixedGroup[], isReadOnly?: boolean }) {
+function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { id: string, members: Member[], fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
     const { setNodeRef } = useDroppable({ id });
     return (
         <div ref={setNodeRef} className={cn("flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar", isReadOnly && "opacity-60 grayscale bg-slate-50/50 dark:bg-slate-900/50")}>
@@ -1294,7 +1409,14 @@ function PoolContainer({ id, members, fixedGroups, isReadOnly }: { id: string, m
                 </div>
             ) : (
                 members.map(m => (
-                    <DraggableMember key={m.id} member={m} fixedGroups={fixedGroups} isReadOnly={isReadOnly} />
+                    <DraggableMember
+                        key={m.id}
+                        member={m}
+                        fixedGroups={fixedGroups}
+                        isReadOnly={isReadOnly}
+                        onShowTooltip={onShowTooltip}
+                        onHideTooltip={onHideTooltip}
+                    />
                 ))
             )}
         </div>
@@ -1355,7 +1477,7 @@ function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: 
     );
 }
 
-function DraggableMember({ member, fixedGroups, isReadOnly }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean }) {
+function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip?: (m: Member, r: DOMRect) => void, onHideTooltip?: () => void }) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: member.id,
         disabled: isReadOnly, // Disable drag if read-only
@@ -1369,13 +1491,35 @@ function DraggableMember({ member, fixedGroups, isReadOnly }: { member: Member, 
         zIndex: 999, // High z-index while dragging
     } : undefined;
 
+    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+    const handleMouseEnter = (e: React.MouseEvent) => {
+        if (!onShowTooltip) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        timerRef.current = setTimeout(() => {
+            onShowTooltip(member, rect);
+        }, 2000);
+    };
+
+    const handleMouseLeave = () => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        if (onHideTooltip) onHideTooltip();
+    };
+
     return (
-        <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={cn(
-            "touch-none",
-            !isReadOnly && "cursor-grab active:cursor-grabbing", // Only show grab cursor if not read-only
-            isDragging ? "opacity-0" : "opacity-100", // Hide original while dragging
-            isReadOnly && "pointer-events-none" // Optional: disable all interactions
-        )}>
+        <div
+            ref={setNodeRef}
+            style={style}
+            {...listeners}
+            {...attributes}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className={cn(
+                "touch-none",
+                !isReadOnly && "cursor-grab active:cursor-grabbing", // Only show grab cursor if not read-only
+                isDragging ? "opacity-0" : "opacity-100", // Hide original while dragging
+                isReadOnly && "pointer-events-none" // Optional: disable all interactions
+            )}>
             <MemberCard member={member} fixedGroup={fixedGroup} />
         </div>
     );
@@ -1434,6 +1578,83 @@ function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverl
                     <span className="text-[10px] text-slate-400">{member.class}</span>
                 </div>
             </div>
+        </div>
+    );
+}
+
+function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[] }) {
+    // Calculate Position (Right of the element, centered vertically or aligned top)
+    // Simple: Fixed position based on rect
+    const style: React.CSSProperties = {
+        position: 'fixed',
+        top: rect.top,
+        left: rect.right + 10,
+        zIndex: 9999,
+    };
+
+    // Find Fixed Group Members
+    const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
+    const groupMembers = fixedGroup ? allMembers.filter(m => fixedGroup.memberIds.includes(m.id) && m.id !== member.id) : [];
+
+    return (
+        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 w-[280px] animate-in slide-in-from-left-2 duration-200">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
+                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
+                    {member.class[0]}
+                </div>
+                <div>
+                    <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>{member.class}</span>
+                        <span>•</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} CP</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Availability */}
+            <div className="mb-4">
+                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                <div className="grid grid-cols-4 gap-1">
+                    {['수', '목', '금', '토', '일', '월', '화'].map(day => {
+                        const slots = member.availability?.[day] || [];
+                        const hasSlots = slots.length > 0;
+                        return (
+                            <div key={day} className={cn(
+                                "text-center p-1 rounded text-[10px] font-bold border",
+                                hasSlots ? "bg-indigo-50 border-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300" : "bg-slate-50 border-slate-100 text-slate-300 dark:bg-slate-800/50 dark:border-slate-800 dark:text-slate-600 opacity-50"
+                            )}>
+                                {day}
+                                {hasSlots && <span className="block text-[9px] font-normal leading-none mt-0.5">{slots.length}T</span>}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Fixed Group Info */}
+            {fixedGroup && (
+                <div>
+                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>고정 파티 ({fixedGroup.name})</span>
+                        <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
+                    </h4>
+                    <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+                        {groupMembers.length > 0 ? groupMembers.map(gm => (
+                            <div key={gm.id} className="flex justify-between items-center text-xs">
+                                <div className="flex items-center gap-2">
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
+                                    <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
+                                </div>
+                                <span className="text-slate-400 text-[10px]">{gm.class}</span>
+                            </div>
+                        )) : (
+                            <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
