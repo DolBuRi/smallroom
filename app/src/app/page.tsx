@@ -12,8 +12,9 @@ import PartyApply from '@/components/party-apply';
 import MarketCalculator from '@/components/market-calculator';
 import AlerterIntegration from '@/components/alerter-integration';
 import VisitorStats from '@/components/visitor-stats';
+import RaidPartyMaker from '@/components/raid-party-maker';
 
-type Tab = 'dashboard' | 'members' | 'ranking' | 'raid' | 'raid_v2' | 'raid_apply' | 'calculator' | 'alerter_integration';
+type Tab = 'dashboard' | 'members' | 'ranking' | 'raid' | 'raid_v2' | 'raid_apply' | 'calculator' | 'alerter_integration' | 'party_maker';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('members');
@@ -133,6 +134,9 @@ export default function Home() {
             <NavButton active={activeTab === 'raid_v2'} onClick={() => setActiveTab('raid_v2')} icon={<Sword size={20} />}>
               성역 파티 도우미 VER2
             </NavButton>
+            <NavButton active={activeTab === 'party_maker'} onClick={() => setActiveTab('party_maker')} icon={<Trophy size={20} />}>
+              성역 파티 매칭
+            </NavButton>
 
             <div className="w-full h-px bg-slate-100 dark:bg-slate-800 my-4" /> {/* Divider */}
 
@@ -176,6 +180,7 @@ export default function Home() {
             {activeTab === 'raid_apply' && <PartyApply />}
             {activeTab === 'raid' && <RaidManager />}
             {activeTab === 'raid_v2' && <RaidManagerV2 />}
+            {activeTab === 'party_maker' && <RaidPartyMaker />}
             {activeTab === 'members' && <MemberList />}
             {activeTab === 'ranking' && <RankingBoard />}
             {/* Alerter Always Mounted (Hidden when inactive) to keep Alarm running */}

@@ -78,7 +78,9 @@ const getCycleDate = (targetDayName: string) => {
 
 import { useAuth } from '@/context/AuthContext';
 
-export default function PartyApply() {
+// --- Main Component ---
+
+export default function PartyApply({ testMode = false }: { testMode?: boolean }) {
     const { isAdmin } = useAuth();
     const [nickname, setNickname] = useState('');
     const [availability, setAvailability] = useState<Record<string, string[]>>({
@@ -93,6 +95,15 @@ export default function PartyApply() {
     const [manualPower, setManualPower] = useState('3000');
 
     React.useEffect(() => {
+        if (testMode) {
+            // Mock Data for Test Mode
+            setMembers([
+                { name: '테스트유저1', class: '수호성', power: 3000 }
+            ]);
+            setExistingApps([]);
+            return;
+        }
+
         // Load Members
         const membersRef = ref(db, 'members');
         const unsubMembers = onValue(membersRef, (snap) => {
@@ -116,7 +127,7 @@ export default function PartyApply() {
             unsubMembers();
             unsubApps();
         }
-    }, []);
+    }, [testMode]);
 
     // When nickname changes, pre-fill availability if exists
     React.useEffect(() => {
@@ -164,6 +175,12 @@ export default function PartyApply() {
             return;
         }
 
+        if (testMode) {
+            alert(`[TEST MODE] 저장 성공 (실제 DB에는 저장되지 않음)\n\n이름: ${trimmedName}\n선택된 슬롯: ${selectedSlotsCount}개`);
+            setLastSaved(new Date().toLocaleString());
+            return;
+        }
+
         const applicationData = {
             nickname: trimmedName,
             class: foundMember ? foundMember.class : manualClass,
@@ -206,6 +223,12 @@ export default function PartyApply() {
         }
 
         if (!confirm(`${trimmedName}님의 신청 정보를 정말로 삭제하시겠습니까?`)) return;
+
+        if (testMode) {
+            alert(`[TEST MODE] 삭제 성공 (실제 DB에는 영향 없음)`);
+            setLastSaved(null);
+            return;
+        }
 
         setIsDeleting(true);
         try {
@@ -307,6 +330,7 @@ export default function PartyApply() {
                     <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
                         <Calendar className="text-indigo-500 dark:text-indigo-400" size={36} />
                         성역 파티 신청 ({getCurrentWeek()})
+                        {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse ml-2">TEST MODE</span>}
                     </h2>
                     <div className="mt-[17px]">
                         <p className="text-slate-500 dark:text-slate-300 text-sm font-medium">
