@@ -894,7 +894,7 @@ function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverl
             )}
 
             <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shadow-inner", getClassColor(member.class))}>
-                {CLASS_ICONS[member.class]}
+                <span className="text-white font-bold">{member.class[0]}</span>
             </div>
 
             <div className="flex-1 min-w-0">
