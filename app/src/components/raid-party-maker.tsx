@@ -517,60 +517,60 @@ export default function RaidPartyMaker() {
                                 ))}
                             </div>
 
-                            {/* Divider */}
-                            <div className="h-px bg-slate-100 dark:bg-slate-800 w-full" />
+                            {/* Divider & Time Slots (Switch based on Day) */}
+                            {selectedDay !== 'ALL' ? (
+                                <>
+                                    <div className="h-px bg-slate-100 dark:bg-slate-800 w-full" />
 
-                            {/* Time Slot Buttons */}
-                            <div className="grid grid-cols-2 gap-1 w-full">
-                                <button
-                                    onClick={() => setSelectedSlot(undefined)}
-                                    className={cn(
-                                        "w-full h-9 text-xs font-bold transition-all border flex items-center justify-center",
-                                        !selectedSlot
-                                            ? "bg-slate-800 text-white border-slate-800 dark:bg-white dark:text-slate-900"
-                                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-                                    )}
-                                >
-                                    시간 전체
-                                </button>
-                                {/* Filter slots based on selected day */}
-                                {(() => {
-                                    let visibleSlots;
-                                    if (selectedDay === 'ALL') {
-                                        // Deduplicate by Label for 'ALL' view
-                                        const labelMap = new Map();
-                                        [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].forEach(s => {
-                                            if (!labelMap.has(s.label)) {
-                                                labelMap.set(s.label, s);
-                                            }
-                                        });
-                                        visibleSlots = Array.from(labelMap.values()).sort((a, b) => a.label.localeCompare(b.label));
-                                    } else if (['토', '일'].includes(selectedDay)) {
-                                        visibleSlots = WEEKEND_SLOTS;
-                                    } else {
-                                        visibleSlots = WEEKDAY_SLOTS;
-                                    }
-
-                                    return visibleSlots.map(s => (
+                                    {/* Time Slot Buttons */}
+                                    <div className="grid grid-cols-2 gap-1 w-full">
                                         <button
-                                            key={s.id}
-                                            onClick={() => setSelectedSlot(s.id)}
+                                            onClick={() => setSelectedSlot(undefined)}
                                             className={cn(
                                                 "w-full h-9 text-xs font-bold transition-all border flex items-center justify-center",
-                                                selectedSlot === s.id
-                                                    ? "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700"
+                                                !selectedSlot
+                                                    ? "bg-slate-800 text-white border-slate-800 dark:bg-white dark:text-slate-900"
                                                     : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
                                             )}
                                         >
-                                            {s.label}
+                                            시간 전체
                                         </button>
-                                    ));
-                                })()}
-                            </div>
+                                        {/* Filter slots based on selected day */}
+                                        {(() => {
+                                            let visibleSlots;
+                                            if (['토', '일'].includes(selectedDay)) {
+                                                visibleSlots = WEEKEND_SLOTS;
+                                            } else {
+                                                visibleSlots = WEEKDAY_SLOTS;
+                                            }
+
+                                            return visibleSlots.map(s => (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => setSelectedSlot(s.id)}
+                                                    className={cn(
+                                                        "w-full h-9 text-xs font-bold transition-all border flex items-center justify-center",
+                                                        selectedSlot === s.id
+                                                            ? "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700"
+                                                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                                    )}
+                                                >
+                                                    {s.label}
+                                                </button>
+                                            ));
+                                        })()}
+                                    </div>
+                                </>
+                            ) : (
+                                /* ALL View Subtitle */
+                                <div className="py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-700/50">
+                                    <span className="text-xs font-medium">전체 목록에서는 리스트 확인만 가능합니다.</span>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    <PoolContainer id="pool" members={filteredPool} fixedGroups={fixedGroups} />
+                    <PoolContainer id="pool" members={filteredPool} fixedGroups={fixedGroups} isReadOnly={selectedDay === 'ALL'} />
                 </div>
 
                 {/* 2. Right: Party Canvas */}
@@ -759,10 +759,10 @@ function SortableAlgoCard({ card, onToggle }: { card: AlgoCard, onToggle: () => 
     );
 }
 
-function PoolContainer({ id, members, fixedGroups }: { id: string, members: Member[], fixedGroups?: FixedGroup[] }) {
+function PoolContainer({ id, members, fixedGroups, isReadOnly }: { id: string, members: Member[], fixedGroups?: FixedGroup[], isReadOnly?: boolean }) {
     const { setNodeRef } = useDroppable({ id });
     return (
-        <div ref={setNodeRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+        <div ref={setNodeRef} className={cn("flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar", isReadOnly && "opacity-60 grayscale bg-slate-50/50 dark:bg-slate-900/50")}>
             {members.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
                     <Users size={32} strokeWidth={1.5} />
@@ -770,7 +770,7 @@ function PoolContainer({ id, members, fixedGroups }: { id: string, members: Memb
                 </div>
             ) : (
                 members.map(m => (
-                    <DraggableMember key={m.id} member={m} fixedGroups={fixedGroups} />
+                    <DraggableMember key={m.id} member={m} fixedGroups={fixedGroups} isReadOnly={isReadOnly} />
                 ))
             )}
         </div>
@@ -831,9 +831,10 @@ function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: 
     );
 }
 
-function DraggableMember({ member, fixedGroups }: { member: Member, fixedGroups?: FixedGroup[] }) {
+function DraggableMember({ member, fixedGroups, isReadOnly }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean }) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: member.id,
+        disabled: isReadOnly, // Disable drag if read-only
     });
 
     // Check Fixed Group
@@ -846,8 +847,10 @@ function DraggableMember({ member, fixedGroups }: { member: Member, fixedGroups?
 
     return (
         <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={cn(
-            "touch-none cursor-grab active:cursor-grabbing",
-            isDragging ? "opacity-0" : "opacity-100" // Hide original while dragging
+            "touch-none",
+            !isReadOnly && "cursor-grab active:cursor-grabbing", // Only show grab cursor if not read-only
+            isDragging ? "opacity-0" : "opacity-100", // Hide original while dragging
+            isReadOnly && "pointer-events-none" // Optional: disable all interactions
         )}>
             <MemberCard member={member} fixedGroup={fixedGroup} />
         </div>
