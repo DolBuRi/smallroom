@@ -426,6 +426,120 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
         executeMove(memberId, targetId);
     };
 
+    // --- Algo Helpers ---
+    const matchFixedParties = (partiesToMatch: Party[], candidates: Member[], pool: Member[]) => {
+        let usedIds: string[] = [];
+        const groupsInCandidates = new Set(candidates.filter(m => m.fixedGroupId).map(m => m.fixedGroupId));
+
+        groupsInCandidates.forEach(gid => {
+            const groupMembers = candidates.filter(m => m.fixedGroupId === gid);
+            if (groupMembers.length === 0) return;
+
+            // Find a party with enough space (Integrity Check)
+            const targetParty = partiesToMatch.find(p => p.members.length + groupMembers.length <= 4);
+
+            if (targetParty) {
+                targetParty.members.push(...groupMembers);
+                groupMembers.forEach(m => usedIds.push(m.id));
+            }
+        });
+        return usedIds;
+    };
+
+    const matchTankHealer = (partiesToMatch: Party[], candidates: Member[]) => {
+        let usedIds: string[] = [];
+        partiesToMatch.forEach(p => {
+            // Tank
+            if (!p.members.some(m => ['수호성', '검성'].includes(m.class))) {
+                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class));
+                if (tank) {
+                    p.members.push(tank);
+                    usedIds.push(tank.id);
+                }
+            }
+            // Healer
+            if (!p.members.some(m => ['치유성', '호법성'].includes(m.class))) {
+                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class));
+                if (healer) {
+                    p.members.push(healer);
+                    usedIds.push(healer.id);
+                }
+            }
+        });
+        return usedIds;
+    };
+
+    const matchAceFirst = (partiesToMatch: Party[], candidates: Member[]) => {
+        let usedIds: string[] = [];
+        partiesToMatch.forEach(p => {
+            while (p.members.length < 4) {
+                const ace = candidates.find(m => !usedIds.includes(m.id));
+                if (!ace) break;
+                p.members.push(ace);
+                usedIds.push(ace.id);
+            }
+        });
+        return usedIds;
+    };
+
+    // Weighted Random Fill (Balance) - Logic similar to before but iterates
+    const matchPowerBalance = (partiesToMatch: Party[], candidates: Member[]) => {
+        let usedIds: string[] = [];
+        // Continue until all parties full or no candidates
+        while (candidates.length > 0 && partiesToMatch.some(p => p.members.length < 4)) {
+            const member = candidates.find(m => !usedIds.includes(m.id));
+            if (!member) break;
+
+            // Find target party with lowest power among those with space
+            const availableParties = partiesToMatch.filter(p => p.members.length < 4);
+            if (availableParties.length === 0) break;
+
+            const targetParty = availableParties.reduce((prev, curr) => {
+                const prevPower = prev.members.reduce((sum, m) => sum + m.power, 0);
+                const currPower = curr.members.reduce((sum, m) => sum + m.power, 0);
+                return prevPower <= currPower ? prev : curr;
+            });
+
+            targetParty.members.push(member);
+            usedIds.push(member.id);
+        }
+        return usedIds;
+    };
+
+    const matchClassSynergy = (partiesToMatch: Party[], candidates: Member[]) => {
+        let usedIds: string[] = [];
+        // Synergy: Magic (Sorc/Spirit) vs Phys (Glad/Sin/Ranger)
+        // Healers apply to both, but ideally Cleric for Magic, Chanter for Phys (heuristic)
+
+        // Simple logic: If a party has Magic DPS, try to add more Magic DPS or Elementalist
+        partiesToMatch.forEach(p => {
+            const hasMagic = p.members.some(m => ['마도성', '정령성'].includes(m.class));
+            const hasPhys = p.members.some(m => ['검성', '살성', '궁성'].includes(m.class));
+
+            if (p.members.length < 4) {
+                let type = hasMagic ? 'MAGIC' : (hasPhys ? 'PHYS' : 'ANY');
+                // If empty, look at candidates provided? No, just pick one to define type logic? 
+                // For now, prioritize filling with same type if established
+
+                if (type === 'MAGIC') {
+                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class));
+                    if (mage) {
+                        p.members.push(mage);
+                        usedIds.push(mage.id);
+                    }
+                } else if (type === 'PHYS') {
+                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class));
+                    if (phys) {
+                        p.members.push(phys);
+                        usedIds.push(phys.id);
+                    }
+                }
+            }
+        });
+        return usedIds;
+    };
+
+
     const handleAutoMatch = () => {
         setIsAutoMatchModalOpen(false);
         const { targetScope, timeScope } = matchOptions;
@@ -472,7 +586,7 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
         forces.forEach(forceIdx => {
             const p1 = workingParties[forceIdx * 2];
             const p2 = workingParties[forceIdx * 2 + 1];
-            if (!p2) return; // Should not happen due to ceiling
+            if (!p2) return;
 
             let forceDay = p1.assignedDay;
             let forceTime = p1.assignedTime;
@@ -480,13 +594,12 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
             if (!forceDay || !forceTime) {
                 if (timeScope === 'CURRENT') {
                     if (selectedSlot) {
-                        forceDay = selectedDay === 'ALL' ? '수' : selectedDay; // Default to Wed if ALL
+                        forceDay = selectedDay === 'ALL' ? '수' : selectedDay;
                         forceTime = selectedSlot;
                     }
                 } else {
                     // Smart Pick
                     let candidateSlots: { day: string, slot: string, score: number }[] = [];
-                    // Scan only Selected Day or All Days (using RAID_DAYS order)
                     const daysToScan = timeScope === 'SELECTED' && selectedDay !== 'ALL' ? [selectedDay] : RAID_DAYS;
                     const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
 
@@ -514,77 +627,48 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
             p2.assignedDay = forceDay;
             p2.assignedTime = forceTime;
 
-            // 3. Filter Candidates
+            // 3. Filter Candidates for THIS Force
             let candidates = workingPool.filter(m => m.availability?.[forceDay!]?.includes(forceTime!));
 
-            // [A] Fixed Group Priority
-            const groupsInCandidates = new Set(candidates.filter(m => m.fixedGroupId).map(m => m.fixedGroupId));
-            groupsInCandidates.forEach(gid => {
-                const groupMembers = candidates.filter(m => m.fixedGroupId === gid);
-                if (groupMembers.length === 0) return;
-                const targetParty = [p1, p2].find(p => p.members.length + groupMembers.length <= 4);
-                if (targetParty) {
-                    targetParty.members.push(...groupMembers);
-                    const ids = groupMembers.map(m => m.id);
-                    candidates = candidates.filter(m => !ids.includes(m.id));
-                    workingPool = workingPool.filter(m => !ids.includes(m.id));
+            // 4. Run Algorithm Pipeline (User Ordered)
+            algoCards.forEach(card => {
+                if (!card.active) return;
+
+                let used: string[] = [];
+                const partiesToMatch = [p1, p2];
+
+                switch (card.id) {
+                    case 'fixed_group':
+                        used = matchFixedParties(partiesToMatch, candidates, workingPool);
+                        break;
+                    case 'tank_healer':
+                        used = matchTankHealer(partiesToMatch, candidates);
+                        break;
+                    case 'ace_first':
+                        used = matchAceFirst(partiesToMatch, candidates);
+                        break;
+                    case 'power_balance':
+                        used = matchPowerBalance(partiesToMatch, candidates);
+                        break;
+                    case 'class_balance': // Using as Synergy/Balance placeholder
+                        used = matchClassSynergy(partiesToMatch, candidates);
+                        break;
+                }
+
+                // Remove used candidates from local force list AND global working pool
+                if (used.length > 0) {
+                    candidates = candidates.filter(m => !used.includes(m.id));
+                    workingPool = workingPool.filter(m => !used.includes(m.id));
                 }
             });
 
-            // [B] Tank/Healer
-            const useTankHealer = algoCards.find(c => c.id === 'tank_healer')?.active;
-            if (useTankHealer) {
-                [p1, p2].forEach(p => {
-                    if (!p.members.some(m => ['수호성', '검성'].includes(m.class))) {
-                        const tank = candidates.find(m => ['수호성', '검성'].includes(m.class));
-                        if (tank) {
-                            p.members.push(tank);
-                            candidates = candidates.filter(m => m.id !== tank.id);
-                            workingPool = workingPool.filter(m => m.id !== tank.id);
-                        }
-                    }
-                    if (!p.members.some(m => ['치유성', '호법성'].includes(m.class))) {
-                        const healer = candidates.find(m => ['치유성', '호법성'].includes(m.class));
-                        if (healer) {
-                            p.members.push(healer);
-                            candidates = candidates.filter(m => m.id !== healer.id);
-                            workingPool = workingPool.filter(m => m.id !== healer.id);
-                        }
-                    }
-                });
-            }
-
-            // [C] Ace First
-            const useAceFirst = algoCards.find(c => c.id === 'ace_first')?.active;
-            if (useAceFirst) {
-                while (p1.members.length < 4 && candidates.length > 0) {
-                    const ace = candidates[0];
-                    p1.members.push(ace);
-                    candidates = candidates.filter(m => m.id !== ace.id);
-                    workingPool = workingPool.filter(m => m.id !== ace.id);
+            // 5. Final Fallback Fill (if Power Balance or Ace wasn't active or enough)
+            // Just fill remaining spots with anyone left to avoid empty slots if possible
+            if (candidates.length > 0 && (p1.members.length < 4 || p2.members.length < 4)) {
+                const leftovers = matchPowerBalance([p1, p2], candidates);
+                if (leftovers.length > 0) {
+                    workingPool = workingPool.filter(m => !leftovers.includes(m.id));
                 }
-            }
-
-            // [D] Fill Remaining
-            const useBalance = algoCards.find(c => c.id === 'power_balance')?.active;
-            while (candidates.length > 0 && (p1.members.length < 4 || p2.members.length < 4)) {
-                const member = candidates[0];
-                let targetP = null;
-
-                if (p1.members.length < 4 && p2.members.length < 4) {
-                    if (useBalance) {
-                        const p1Power = p1.members.reduce((s, m) => s + m.power, 0);
-                        const p2Power = p2.members.reduce((s, m) => s + m.power, 0);
-                        targetP = p1Power <= p2Power ? p1 : p2;
-                    } else {
-                        targetP = p1;
-                    }
-                } else if (p1.members.length < 4) targetP = p1;
-                else targetP = p2;
-
-                targetP.members.push(member);
-                candidates = candidates.filter(m => m.id !== member.id);
-                workingPool = workingPool.filter(m => m.id !== member.id);
             }
         });
 
