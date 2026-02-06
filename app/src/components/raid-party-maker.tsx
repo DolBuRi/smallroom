@@ -4,10 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { DndContext, DragOverlay, useDraggable, useDroppable, DragStartEvent, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, X, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, set, get, child } from 'firebase/database';
 import { cn } from '@/lib/utils';
 
 // --- Types ---
@@ -95,7 +95,7 @@ const getClassColor = (className: string) => {
 };
 
 // --- Main Component Stub ---
-export default function RaidPartyMaker() {
+export default function RaidPartyMaker({ testMode = false }: { testMode?: boolean }) {
     const { loading } = useAuth();
 
     // Data State
@@ -108,6 +108,7 @@ export default function RaidPartyMaker() {
     const [draggedMember, setDraggedMember] = useState<Member | null>(null);
     const [isOptionsOpen, setIsOptionsOpen] = useState(false);
     const [isAutoMatchModalOpen, setIsAutoMatchModalOpen] = useState(false);
+    const [isAlgoSettingsModalOpen, setIsAlgoSettingsModalOpen] = useState(false);
     const [isFixedGroupModalOpen, setIsFixedGroupModalOpen] = useState(false);
     const [confirmationModal, setConfirmationModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void; onCancel: () => void }>({ isOpen: false, message: '', onConfirm: () => { }, onCancel: () => { } });
 
@@ -119,10 +120,12 @@ export default function RaidPartyMaker() {
         timeScope: 'CURRENT',
         priority: 'BALANCED'
     });
-    const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([
-        { id: 'fg-1', name: '1팀 (고정)', color: 'bg-rose-500', memberIds: [] },
-        { id: 'fg-2', name: '2팀 (고정)', color: 'bg-indigo-500', memberIds: [] }
-    ]);
+
+    // Fixed Groups - now loaded from DB
+    const [selectedFixedGroupId, setSelectedFixedGroupId] = useState<string | null>(null);
+    const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
+    const [isFixedGroupsLoaded, setIsFixedGroupsLoaded] = useState(false);
+    const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
     // --- Filters ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -135,8 +138,62 @@ export default function RaidPartyMaker() {
         { id: 'class_balance', label: '클래스 조합 고려', desc: '파티 내 클래스 중복을 최소화합니다.', active: false },
     ]);
 
+
     // --- Effects ---
+    // Close color picker when group changes
     useEffect(() => {
+        setIsColorPickerOpen(false);
+    }, [selectedFixedGroupId]);
+
+    // Reset color picker when modal opens/closes
+    useEffect(() => {
+        setIsColorPickerOpen(false);
+    }, [isFixedGroupModalOpen]);
+
+    // 1. Load Members (One-time or Mock)
+    useEffect(() => {
+        if (testMode) {
+            // Mock Data Generation
+            const classes = ['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
+            const mockMembers: Member[] = Array.from({ length: 150 }, (_, i) => {
+                // Randomize Availability
+                const availability: Record<string, string[]> = {};
+                const days = ['수', '목', '금', '토', '일', '월', '화'];
+                const slotsWeekday = ['wd1', 'wd2'];
+                const slotsWeekend = ['we1', 'we2', 'we3'];
+
+                // Assign random slots (3~7 slots per user)
+                const numSlots = Math.floor(Math.random() * 5) + 3;
+                for (let j = 0; j < numSlots; j++) {
+                    const day = days[Math.floor(Math.random() * days.length)];
+                    const isWeekend = ['토', '일'].includes(day);
+                    const slotPool = isWeekend ? slotsWeekend : slotsWeekday;
+                    const slot = slotPool[Math.floor(Math.random() * slotPool.length)];
+
+                    if (!availability[day]) availability[day] = [];
+                    if (!availability[day].includes(slot)) availability[day].push(slot);
+                }
+
+                return {
+                    id: `mock-${i}`,
+                    name: `테스트${i + 1}`,
+                    class: classes[Math.floor(Math.random() * classes.length)],
+                    power: Math.floor(Math.random() * 3000) + 1000,
+                    rank: '정예',
+                    availability,
+                    fixedGroupId: i < 5 ? 'fg-1' : (i < 10 ? 'fg-2' : undefined) // Scatter fixed members
+                };
+            });
+            setAllMembers(mockMembers);
+            setPool(mockMembers);
+
+            // Init Parties
+            setParties(Array.from({ length: 8 }, (_, i) => ({
+                id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
+            })));
+            return;
+        }
+
         const loadMembers = async () => {
             // Mock Load for now or real logic
             // Ideally fetching from DB
@@ -162,7 +219,93 @@ export default function RaidPartyMaker() {
             }, { onlyOnce: true });
         };
         loadMembers();
-    }, []);
+    }, [testMode]);
+
+    // 2. Load Fixed Groups (One-time or Mock)
+    useEffect(() => {
+        if (testMode) {
+            setFixedGroups([
+                { id: 'fg-1', name: '테스트 1팀', color: 'bg-rose-500', memberIds: ['mock-0', 'mock-1', 'mock-2'] },
+                { id: 'fg-2', name: '테스트 2팀', color: 'bg-indigo-500', memberIds: [] }
+            ]);
+            setIsFixedGroupsLoaded(true);
+            return;
+        }
+
+        const loadFixedGroups = async () => {
+            try {
+                const snapshot = await get(ref(db, 'raid_fixed_groups'));
+                if (snapshot.exists()) {
+                    const data = snapshot.val() as FixedGroup[];
+                    // Sanitize: Firebase removes empty arrays, so ensure memberIds exists
+                    const sanitized = data.map(g => ({
+                        ...g,
+                        memberIds: g.memberIds || []
+                    }));
+                    setFixedGroups(sanitized);
+                } else {
+                    // Default Init if empty
+                    const defaults = [
+                        { id: 'fg-1', name: '1팀', color: 'bg-rose-500', memberIds: [] },
+                        { id: 'fg-2', name: '2팀', color: 'bg-indigo-500', memberIds: [] }
+                    ];
+                    setFixedGroups(defaults);
+                    set(ref(db, 'raid_fixed_groups'), defaults); // Create initial
+                }
+            } catch (e) {
+                console.error("Failed to load fixed groups", e);
+                // Fallback local defaults
+                setFixedGroups([
+                    { id: 'fg-1', name: '1팀', color: 'bg-rose-500', memberIds: [] },
+                    { id: 'fg-2', name: '2팀', color: 'bg-indigo-500', memberIds: [] }
+                ]);
+            } finally {
+                setIsFixedGroupsLoaded(true);
+            }
+        };
+        loadFixedGroups();
+    }, [testMode]);
+
+    // 3. Auto-Save Fixed Groups
+    useEffect(() => {
+        if (!isFixedGroupsLoaded) return;
+        if (testMode) return; // Disable Save in Test Mode
+        set(ref(db, 'raid_fixed_groups'), fixedGroups);
+    }, [fixedGroups, isFixedGroupsLoaded, testMode]);
+
+
+    // --- Sync Fixed Groups to Members ---
+    useEffect(() => {
+        if (allMembers.length === 0) return;
+
+        // Create a map of memberId -> fixedGroupId
+        const fixedMap = new Map<string, string>();
+        fixedGroups.forEach(fg => {
+            (fg.memberIds || []).forEach(mid => fixedMap.set(mid, fg.id));
+        });
+
+        // Update function helper
+        const updateMember = (m: Member): Member => {
+            const newFixedId = fixedMap.get(m.id);
+            if (m.fixedGroupId !== newFixedId) {
+                return { ...m, fixedGroupId: newFixedId };
+            }
+            return m;
+        };
+
+        // Sync to allMembers
+        setAllMembers(prev => prev.map(updateMember));
+
+        // Sync to Pool
+        setPool(prev => prev.map(updateMember));
+
+        // Sync to Parties (if members are already assigned there)
+        setParties(prev => prev.map(p => ({
+            ...p,
+            members: p.members.map(updateMember)
+        })));
+
+    }, [fixedGroups]); // Trigger when fixedGroups changes
 
     // --- Helper Functions ---
     const getSlotLabel = (id: string) => {
@@ -467,6 +610,28 @@ export default function RaidPartyMaker() {
         return true;
     });
 
+    // Sort: Combat Power Desc (Grouped by Fixed Party's Max Power)
+    const sortedPool = [...filteredPool].sort((a, b) => {
+        // 1. Calculate Effective Sort Power
+        const getSortPower = (m: Member) => {
+            if (m.fixedGroupId) {
+                // If in fixed group, use the group's max power
+                const groupMembers = pool.filter(gm => gm.fixedGroupId === m.fixedGroupId);
+                return Math.max(...groupMembers.map(gm => gm.power));
+            }
+            return m.power;
+        };
+
+        const powerA = getSortPower(a);
+        const powerB = getSortPower(b);
+
+        // 2. Primary Sort: Effective Power (Group vs Solo)
+        if (powerA !== powerB) return powerB - powerA;
+
+        // 3. Secondary Sort: Member's Own Power (within group or ties)
+        return b.power - a.power;
+    });
+
     // --- Render ---
     return (
         <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={closestCenter}>
@@ -476,11 +641,11 @@ export default function RaidPartyMaker() {
                 <div className="w-1/3 min-w-[360px] flex flex-col bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden z-10 transition-all">
                     <div className="p-4 border-b flex justify-between items-center bg-white/50 dark:bg-slate-800/50">
                         <div className="flex items-center gap-2">
-                            <h2 className="font-bold flex items-center gap-2"><Users size={18} className="text-indigo-500" /> 대기 멤버 ({filteredPool.length})</h2>
+                            <h2 className="font-bold flex items-center gap-2"><Users size={18} className="text-indigo-500" /> 대기 멤버 ({sortedPool.length})</h2>
                         </div>
                         <div className="flex gap-1">
-                            <button onClick={() => setIsFixedGroupModalOpen(true)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500 transition-colors" title="고정 파티 관리">
-                                <Settings2 size={18} />
+                            <button onClick={() => setIsFixedGroupModalOpen(true)} className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300" title="고정 파티 관리">
+                                <Settings size={14} /> 고정 파티 설정
                             </button>
                         </div>
                     </div>
@@ -589,16 +754,21 @@ export default function RaidPartyMaker() {
                         </div>
                     </div>
 
-                    <PoolContainer id="pool" members={filteredPool} fixedGroups={fixedGroups} isReadOnly={selectedDay === 'ALL'} />
+                    <PoolContainer id="pool" members={sortedPool} fixedGroups={fixedGroups} isReadOnly={selectedDay === 'ALL'} />
                 </div>
 
                 {/* 2. Right: Party Canvas */}
                 <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
                     <div className="p-4 border-b flex justify-between items-center bg-white/50 dark:bg-slate-800/50">
                         <h2 className="font-bold flex items-center gap-2"><Shield size={18} className="text-rose-500" /> 파티 구성 ({parties.length})</h2>
-                        <button onClick={() => setIsAutoMatchModalOpen(true)} className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1">
-                            <Sparkles size={14} /> 자동 매칭 시작
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setIsAlgoSettingsModalOpen(true)} className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
+                                <Settings2 size={14} /> 매칭 알고리즘 수정
+                            </button>
+                            <button onClick={() => setIsAutoMatchModalOpen(true)} className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1">
+                                <Sparkles size={14} /> 자동 매칭 시작
+                            </button>
+                        </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-4">
                         {parties.map((party, idx) => (
@@ -619,74 +789,51 @@ export default function RaidPartyMaker() {
                 {draggedMember ? <MemberCard member={draggedMember} isOverlay /> : null}
             </DragOverlay>
 
-            {/* Auto Match Modal */}
+            {/* Auto Match Modal (Simplified - Scope Only) */}
             {isAutoMatchModalOpen && (
                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                             <div>
                                 <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <Sparkles className="text-indigo-500" /> 자동 매칭 설정
+                                    <Sparkles className="text-indigo-500" /> 자동 매칭 시작
                                 </h2>
-                                <p className="text-sm text-slate-500 mt-1">알고리즘 우선순위와 범위를 설정하세요.</p>
+                                <p className="text-sm text-slate-500 mt-1">매칭 범위를 선택하고 실행하세요.</p>
                             </div>
                             <button onClick={() => setIsAutoMatchModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
                                 <X size={20} />
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                            {/* 1. Scope Options */}
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Scope Options */}
                             <section>
-                                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs">1</div>
-                                    매칭 대상 범위
-                                </h3>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 gap-3">
                                     <label className={cn(
-                                        "flex flex-col gap-2 p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
+                                        "flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
                                         matchOptions.targetScope === 'FILL' ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
                                     )}>
-                                        <div className="flex justify-between">
-                                            <span className="font-bold text-sm">빈 자리 채우기 (FILL)</span>
-                                            <input type="radio" name="scope" className="accent-indigo-500"
-                                                checked={matchOptions.targetScope === 'FILL'}
-                                                onChange={() => setMatchOptions(o => ({ ...o, targetScope: 'FILL' }))} />
+                                        <input type="radio" name="scope" className="mt-1 accent-indigo-500 w-4 h-4"
+                                            checked={matchOptions.targetScope === 'FILL'}
+                                            onChange={() => setMatchOptions(o => ({ ...o, targetScope: 'FILL' }))} />
+                                        <div>
+                                            <span className="font-bold text-sm block mb-1">빈 자리 채우기 (FILL)</span>
+                                            <p className="text-xs text-slate-500">현재 구성된 파티원은 유지하고,<br />남은 빈 자리만 대기 멤버로 채웁니다.</p>
                                         </div>
-                                        <p className="text-xs text-slate-500">현재 구성된 파티원은 유지하고,<br />남은 빈 자리만 대기 멤버로 채웁니다.</p>
                                     </label>
                                     <label className={cn(
-                                        "flex flex-col gap-2 p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
+                                        "flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
                                         matchOptions.targetScope === 'RESHUFFLE' ? "border-rose-500 bg-rose-50/50 dark:bg-rose-900/10" : "border-slate-100 dark:border-slate-800"
                                     )}>
-                                        <div className="flex justify-between">
-                                            <span className="font-bold text-sm">전체 재분배 (Re-Shuffle)</span>
-                                            <input type="radio" name="scope" className="accent-rose-500"
-                                                checked={matchOptions.targetScope === 'RESHUFFLE'}
-                                                onChange={() => setMatchOptions(o => ({ ...o, targetScope: 'RESHUFFLE' }))} />
+                                        <input type="radio" name="scope" className="mt-1 accent-rose-500 w-4 h-4"
+                                            checked={matchOptions.targetScope === 'RESHUFFLE'}
+                                            onChange={() => setMatchOptions(o => ({ ...o, targetScope: 'RESHUFFLE' }))} />
+                                        <div>
+                                            <span className="font-bold text-sm block mb-1">전체 재분배 (Re-Shuffle)</span>
+                                            <p className="text-xs text-slate-500">모든 파티를 해체하고 처음부터 다시 배치합니다.<br /><span className="text-rose-500 font-bold">※ 기존 구성이 초기화됩니다.</span></p>
                                         </div>
-                                        <p className="text-xs text-slate-500">모든 파티를 해체하고 처음부터 다시 배치합니다.<br /><span className="text-rose-500 font-bold">※ 기존 구성이 초기화됩니다.</span></p>
                                     </label>
                                 </div>
-                            </section>
-
-                            <hr className="border-slate-100 dark:border-slate-800" />
-
-                            {/* 2. Algorithm Cards */}
-                            <section>
-                                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs">2</div>
-                                    알고리즘 우선순위 (드래그하여 순서 변경)
-                                </h3>
-                                <DndContext collisionDetection={closestCenter} onDragEnd={handleAlgoDragEnd}>
-                                    <SortableContext items={algoCards} strategy={verticalListSortingStrategy}>
-                                        <div className="space-y-2">
-                                            {algoCards.map((card) => (
-                                                <SortableAlgoCard key={card.id} card={card} onToggle={() => toggleAlgo(card.id)} />
-                                            ))}
-                                        </div>
-                                    </SortableContext>
-                                </DndContext>
                             </section>
                         </div>
 
@@ -702,9 +849,46 @@ export default function RaidPartyMaker() {
                 </div>
             )}
 
+            {/* Algorithm Settings Modal (New - Separated) */}
+            {isAlgoSettingsModalOpen && (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2">
+                                    <Settings className="text-slate-500" /> 매칭 알고리즘 설정
+                                </h2>
+                                <p className="text-sm text-slate-500 mt-1">우선순위를 드래그하여 조정하세요.</p>
+                            </div>
+                            <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <DndContext collisionDetection={closestCenter} onDragEnd={handleAlgoDragEnd}>
+                                <SortableContext items={algoCards} strategy={verticalListSortingStrategy}>
+                                    <div className="space-y-2">
+                                        {algoCards.map((card) => (
+                                            <SortableAlgoCard key={card.id} card={card} onToggle={() => toggleAlgo(card.id)} />
+                                        ))}
+                                    </div>
+                                </SortableContext>
+                            </DndContext>
+                        </div>
+
+                        <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end">
+                            <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="px-6 py-2.5 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-colors">
+                                완료
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Confirmation Modal */}
             {confirmationModal.isOpen && (
-                <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center animate-in fade-in duration-200">
+                <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 dark:border-slate-700">
                         <div className="flex items-center gap-3 mb-4">
                             <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center">
@@ -722,22 +906,259 @@ export default function RaidPartyMaker() {
             )}
 
             {/* Fixed Group Modal Stub (Can be implemented fully later if needed, mostly CRUD) */}
+            {/* Fixed Group Modal */}
             {isFixedGroupModalOpen && (
-                <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center">
-                    <div className="bg-white p-6 rounded-xl w-96">
-                        <h3 className="font-bold mb-4">고정 파티 관리</h3>
-                        <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-                            {fixedGroups.map(bg => (
-                                <div key={bg.id} className="flex items-center justify-between p-2 border rounded">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`w-3 h-3 rounded-full ${bg.color}`} />
-                                        <span>{bg.name}</span>
-                                    </div>
-                                    <span className="text-xs text-slate-400">{bg.memberIds.length}명</span>
-                                </div>
-                            ))}
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-900 w-[80vw] max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
+                        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                    <Settings size={20} className="text-slate-500" /> 고정 파티 관리
+                                </h3>
+                                <p className="text-sm text-slate-500 mt-1">고정으로 운영할 파티원을 관리합니다.</p>
+                            </div>
+                            <button onClick={() => setIsFixedGroupModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+                                <X size={20} />
+                            </button>
                         </div>
-                        <button onClick={() => setIsFixedGroupModalOpen(false)} className="w-full py-2 bg-slate-100 rounded">닫기</button>
+
+                        <div className="flex flex-1 overflow-hidden">
+                            {/* Left: Group List */}
+                            <div className="w-1/3 border-r border-slate-100 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto space-y-2">
+                                {fixedGroups.map(fg => (
+                                    <button
+                                        key={fg.id}
+                                        onClick={() => setSelectedFixedGroupId(fg.id)}
+                                        className={cn(
+                                            "w-full text-left p-3 rounded-xl border transition-all shadow-sm group",
+                                            selectedFixedGroupId === fg.id
+                                                ? "bg-white dark:bg-slate-800 border-indigo-500 ring-1 ring-indigo-500 z-10"
+                                                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400"
+                                        )}
+                                    >
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center gap-2 font-bold text-sm">
+                                                <div className={cn("w-3 h-3 rounded-full", fg.color)} />
+                                                {fg.name}
+                                            </div>
+                                            <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">{fg.memberIds.length}명</span>
+                                        </div>
+                                    </button>
+                                ))}
+                                <button
+                                    onClick={() => {
+                                        const newId = `fg-${Date.now()}`;
+                                        const newName = `${fixedGroups.length + 1}팀`;
+                                        const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500'];
+                                        const newColor = colors[fixedGroups.length % colors.length];
+
+                                        const newGroup: FixedGroup = {
+                                            id: newId,
+                                            name: newName,
+                                            color: newColor,
+                                            memberIds: []
+                                        };
+
+                                        setFixedGroups([...fixedGroups, newGroup]);
+                                        setSelectedFixedGroupId(newId);
+                                    }}
+                                    className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center justify-center gap-2 font-bold text-sm"
+                                >
+                                    <Plus size={16} /> 새 팀 추가
+                                </button>
+                            </div>
+
+                            {/* Right: Member Editor */}
+                            <div className="flex-1 p-6 flex flex-col bg-white dark:bg-slate-900">
+                                {selectedFixedGroupId ? (
+                                    (() => {
+                                        const selectedGroup = fixedGroups.find(g => g.id === selectedFixedGroupId);
+                                        if (!selectedGroup) return null;
+
+                                        return (
+                                            <div className="flex flex-col h-full">
+                                                <div className="mb-4 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-2 flex-1">
+                                                        <button
+                                                            onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+                                                            className={cn("w-4 h-4 rounded-full transition-transform hover:scale-125 focus:outline-none ring-2 ring-offset-2 ring-transparent focus:ring-indigo-500", selectedGroup.color)}
+                                                            title="팀 색상 변경"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={selectedGroup.name}
+                                                            onChange={(e) => {
+                                                                const newName = e.target.value;
+                                                                setFixedGroups(fixedGroups.map(fg =>
+                                                                    fg.id === selectedFixedGroupId ? { ...fg, name: newName } : fg
+                                                                ));
+                                                            }}
+                                                            className="font-bold text-lg bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-colors w-full"
+                                                            placeholder="팀 이름 입력"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm(`'${selectedGroup.name}' 팀을 삭제하시겠습니까?`)) {
+                                                                setFixedGroups(fixedGroups.filter(fg => fg.id !== selectedFixedGroupId));
+                                                                setSelectedFixedGroupId(null);
+                                                            }
+                                                        }}
+                                                        className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                                                        title="팀 삭제"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                    </button>
+                                                </div>
+
+                                                {/* Color Picker (Toggled) */}
+                                                {isColorPickerOpen && (
+                                                    <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar animate-in slide-in-from-top-2 fade-in duration-200">
+                                                        {[
+                                                            'bg-slate-500', 'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
+                                                            'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500',
+                                                            'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500',
+                                                            'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500'
+                                                        ].map(color => (
+                                                            <button
+                                                                key={color}
+                                                                onClick={() => {
+                                                                    setFixedGroups(fixedGroups.map(fg =>
+                                                                        fg.id === selectedFixedGroupId ? { ...fg, color } : fg
+                                                                    ));
+                                                                    // Keep open for easy switching
+                                                                }}
+                                                                className={cn(
+                                                                    "w-8 h-8 rounded-full shrink-0 transition-all border-2",
+                                                                    color,
+                                                                    selectedGroup.color === color ? "border-slate-600 dark:border-white scale-110 shadow-lg ring-2 ring-offset-2 ring-indigo-500" : "border-transparent opacity-70 hover:opacity-100 hover:scale-105"
+                                                                )}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Add Member Input (Simple ID/Name Match for prototype) */}
+                                                <div className="mb-4 flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="캐릭터명 검색 (엔터로 추가)"
+                                                        className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                const val = e.currentTarget.value.trim();
+                                                                if (!val) return;
+
+                                                                // Simple logic: find member by name or ID
+                                                                // In real app, this should be a proper search dropdown
+                                                                const member = allMembers.find(m => m.name === val || m.id === val);
+                                                                if (member) {
+                                                                    // 1. Check if already in THIS group
+                                                                    if (selectedGroup.memberIds.includes(member.id)) {
+                                                                        alert("이미 이 팀에 추가된 멤버입니다.");
+                                                                        e.currentTarget.value = '';
+                                                                        return;
+                                                                    }
+
+                                                                    // 2. Check if already in ANOTHER group
+                                                                    const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id));
+
+                                                                    if (otherGroup) {
+                                                                        // Custom Modal for confirmation
+                                                                        setConfirmationModal({
+                                                                            isOpen: true,
+                                                                            message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n'${selectedGroup.name}'(으)로 이동하시겠습니까?`,
+                                                                            onConfirm: () => {
+                                                                                setFixedGroups(prev => prev.map(fg => {
+                                                                                    if (fg.id === otherGroup.id) {
+                                                                                        return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id) };
+                                                                                    }
+                                                                                    if (fg.id === selectedFixedGroupId) {
+                                                                                        return { ...fg, memberIds: [...fg.memberIds, member.id] };
+                                                                                    }
+                                                                                    return fg;
+                                                                                }));
+                                                                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                                                            },
+                                                                            onCancel: () => {
+                                                                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                                                            }
+                                                                        });
+                                                                        // Note: Input clearing in async flow is tricky, keeping logic simple or clearing immediately if desired.
+                                                                        // Original logic cleared it inside confirm block. Here we clear it in onConfirm or immediately?
+                                                                        // Should clear immediately to avoid confusion, or handle it via state.
+                                                                        // For now, let's clear it immediately to match recent user behavior expectations if accepted,
+                                                                        // but wait, if cancelled? Better to keep it?
+                                                                        // Let's clear it immediately as it's cleaner for "pending action".
+                                                                        e.currentTarget.value = '';
+                                                                    } else {
+                                                                        // 3. Just Add
+                                                                        setFixedGroups(fixedGroups.map(fg =>
+                                                                            fg.id === selectedFixedGroupId
+                                                                                ? { ...fg, memberIds: [...fg.memberIds, member.id] }
+                                                                                : fg
+                                                                        ));
+                                                                        e.currentTarget.value = '';
+                                                                    }
+                                                                } else {
+                                                                }
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                {/* Member List */}
+                                                <div className="flex-1 overflow-y-auto space-y-2">
+                                                    {selectedGroup.memberIds.length === 0 ? (
+                                                        <div className="h-40 flex flex-col items-center justify-center text-slate-400 opacity-60">
+                                                            <p className="text-sm">등록된 멤버가 없습니다.</p>
+                                                        </div>
+                                                    ) : (
+                                                        selectedGroup.memberIds.map(mid => {
+                                                            const member = allMembers.find(m => m.id === mid);
+                                                            return (
+                                                                <div key={mid} className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                                                                    <div className="flex items-center gap-2">
+                                                                        {member ? (
+                                                                            <>
+                                                                                <div className={cn("w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white", getClassColor(member.class))}>
+                                                                                    {member.class[0]}
+                                                                                </div>
+                                                                                <span className="font-bold text-sm">{member.name}</span>
+                                                                            </>
+                                                                        ) : (
+                                                                            <span className="text-slate-400 text-sm">Unknown ({mid})</span>
+                                                                        )}
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            const newGroups = fixedGroups.map(fg =>
+                                                                                fg.id === selectedFixedGroupId
+                                                                                    ? { ...fg, memberIds: fg.memberIds.filter(id => id !== mid) }
+                                                                                    : fg
+                                                                            );
+                                                                            setFixedGroups(newGroups);
+                                                                        }}
+                                                                        className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
+                                                                    >
+                                                                        <Trash2 size={14} />
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
+                                        <Users size={32} />
+                                        <p className="text-sm">왼쪽에서 고정 파티를 선택해주세요</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -876,17 +1297,38 @@ function DraggableMember({ member, fixedGroups, isReadOnly }: { member: Member, 
     );
 }
 
+// Safe mapping for Tailwind classes to ensure they are not purged
+const COLOR_MAP: Record<string, string> = {
+    'bg-slate-500': 'border-slate-500',
+    'bg-red-500': 'border-red-500',
+    'bg-orange-500': 'border-orange-500',
+    'bg-amber-500': 'border-amber-500',
+    'bg-yellow-500': 'border-yellow-500',
+    'bg-lime-500': 'border-lime-500',
+    'bg-green-500': 'border-green-500',
+    'bg-emerald-500': 'border-emerald-500',
+    'bg-teal-500': 'border-teal-500',
+    'bg-cyan-500': 'border-cyan-500',
+    'bg-sky-500': 'border-sky-500',
+    'bg-blue-500': 'border-blue-500',
+    'bg-indigo-500': 'border-indigo-500',
+    'bg-violet-500': 'border-violet-500',
+    'bg-purple-500': 'border-purple-500',
+    'bg-fuchsia-500': 'border-fuchsia-500',
+    'bg-pink-500': 'border-pink-500',
+    'bg-rose-500': 'border-rose-500'
+};
+
 function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup }) {
+    // Explicit lookup to fix Tailwind JIT purging
+    const borderColorClass = fixedGroup ? (COLOR_MAP[fixedGroup.color] || 'border-slate-200') : '';
+
     return (
         <div className={cn(
-            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none",
-            isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 shadow-sm",
-            fixedGroup && !isOverlay ? "ring-2 ring-offset-1" : ""
+            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border",
+            isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "shadow-sm",
+            fixedGroup && !isOverlay ? cn("border-2", borderColorClass) : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
         )}
-            style={{
-                borderColor: fixedGroup ? undefined : undefined,
-                boxShadow: fixedGroup ? `0 0 0 2px ${fixedGroup.color.replace('bg-', '')}` : undefined // Mock logic for color ring
-            }}
         >
             {/* Fixed Group Indicator */}
             {fixedGroup && (

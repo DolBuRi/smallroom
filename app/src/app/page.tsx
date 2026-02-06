@@ -180,7 +180,7 @@ export default function Home() {
             {activeTab === 'raid_apply' && <PartyApply />}
             {activeTab === 'raid' && <RaidManager />}
             {activeTab === 'raid_v2' && <RaidManagerV2 />}
-            {activeTab === 'party_maker' && <RaidPartyMaker />}
+            {activeTab === 'party_maker' && <RaidPartyMaker testMode={debugClicks >= 5} />}
             {activeTab === 'members' && <MemberList />}
             {activeTab === 'ranking' && <RankingBoard />}
             {/* Alerter Always Mounted (Hidden when inactive) to keep Alarm running */}
