@@ -12,7 +12,7 @@ import PartyApply from '@/components/party-apply';
 import MarketCalculator from '@/components/market-calculator';
 import AlerterIntegration from '@/components/alerter-integration';
 import VisitorStats from '@/components/visitor-stats';
-import RaidPartyMaker from '@/components/raid-party-maker';
+import RaidPartyMakerV3 from '@/components/raid-party-maker';
 
 type Tab = 'dashboard' | 'members' | 'ranking' | 'raid' | 'raid_v2' | 'raid_apply' | 'calculator' | 'alerter_integration' | 'party_maker';
 
@@ -180,7 +180,7 @@ export default function Home() {
             {activeTab === 'raid_apply' && <PartyApply />}
             {activeTab === 'raid' && <RaidManager />}
             {activeTab === 'raid_v2' && <RaidManagerV2 />}
-            {activeTab === 'party_maker' && <RaidPartyMaker testMode={debugClicks >= 5} />}
+            {activeTab === 'party_maker' && <RaidPartyMakerV3 testMode={debugClicks >= 5} />}
             {activeTab === 'members' && <MemberList />}
             {activeTab === 'ranking' && <RankingBoard />}
             {/* Alerter Always Mounted (Hidden when inactive) to keep Alarm running */}
