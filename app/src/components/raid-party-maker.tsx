@@ -903,7 +903,7 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
                 {/* 2. Right: Party Canvas */}
                 <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
                     <div className="p-4 border-b flex justify-between items-center bg-white/50 dark:bg-slate-800/50">
-                        <h2 className="font-bold flex items-center gap-2"><Shield size={18} className="text-rose-500" /> 파티 구성 ({parties.length})</h2>
+                        <h2 className="font-bold flex items-center gap-2"><Shield size={18} className="text-rose-500" /> 포스 구성 ({Math.ceil(parties.length / 2)})</h2>
                         <div className="flex items-center gap-2">
                             <button onClick={() => setIsAlgoSettingsModalOpen(true)} className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
                                 <Settings2 size={14} /> 매칭 알고리즘 수정
@@ -959,8 +959,8 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
 
                                     {/* Parties Grid (2 items) */}
                                     <div className="p-4 grid grid-cols-2 gap-4">
-                                        {party1 && <PartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} />}
-                                        {party2 && <PartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} />}
+                                        {party1 && <RaidPartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} />}
+                                        {party2 && <RaidPartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} />}
                                     </div>
                                 </div>
                             );
@@ -1423,7 +1423,8 @@ function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, on
     );
 }
 
-function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: FixedGroup[], index: number }) {
+// Renamed to force HMR update
+function RaidPartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: FixedGroup[], index: number }) {
     const { setNodeRef, isOver } = useDroppable({ id: party.id });
 
     // Derived Force Info (0-1, 2-3 pair)
@@ -1438,9 +1439,7 @@ function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: 
             {/* Thread/Connector Visuals if needed */}
             <div className="p-3 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
                 <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300">
-                        {index + 1}
-                    </div>
+                    {/* Index Removed */}
                     <span className="font-bold text-slate-700 dark:text-slate-200">{party.name}</span>
                     <span className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded font-medium",
@@ -1449,13 +1448,28 @@ function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: 
                         {party.members.length}/4
                     </span>
                 </div>
-                {/* Time Display (Small) */}
-                {party.assignedDay && party.assignedTime && (
-                    <div className="flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full border border-indigo-100">
-                        <Clock size={10} />
-                        <span>{party.assignedDay} {party.assignedTime}</span>
+
+                <div className="flex items-center gap-1">
+                    {/* Tanker Indicator */}
+                    <div className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
+                        party.members.some(m => ['수호성', '검성'].includes(m.class))
+                            ? "bg-blue-100 border-blue-200 text-blue-600 shadow-sm shadow-blue-100" // Active
+                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
+                    )}>
+                        <Shield size={14} strokeWidth={2.5} />
                     </div>
-                )}
+
+                    {/* Healer Indicator */}
+                    <div className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
+                        party.members.some(m => ['치유성', '호법성'].includes(m.class))
+                            ? "bg-green-100 border-green-200 text-green-600 shadow-sm shadow-green-100" // Active
+                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
+                    )}>
+                        <Plus size={14} strokeWidth={2.5} />
+                    </div>
+                </div>
             </div>
 
             <div ref={setNodeRef} className="flex-1 p-2 space-y-1.5 overflow-y-auto custom-scrollbar relative">
@@ -1473,7 +1487,7 @@ function PartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: 
             <div className="p-2 bg-slate-50 border-t border-slate-100 flex justify-between text-[10px] text-slate-400">
                 <span>Power: {party.members.reduce((s, m) => s + m.power, 0).toLocaleString()}</span>
             </div>
-        </div>
+        </div >
     );
 }
 
