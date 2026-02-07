@@ -894,7 +894,7 @@ export default function RaidPartyMaker({ testMode = false }: { testMode?: boolea
                         id="pool"
                         members={sortedPool}
                         fixedGroups={fixedGroups}
-                        isReadOnly={selectedDay === 'ALL'}
+                        isReadOnly={selectedDay === 'ALL' || !selectedSlot}
                         onShowTooltip={handleShowTooltip}
                         onHideTooltip={handleHideTooltip}
                     />
@@ -1491,18 +1491,13 @@ function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHid
         zIndex: 999, // High z-index while dragging
     } : undefined;
 
-    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
-
     const handleMouseEnter = (e: React.MouseEvent) => {
         if (!onShowTooltip) return;
         const rect = e.currentTarget.getBoundingClientRect();
-        timerRef.current = setTimeout(() => {
-            onShowTooltip(member, rect);
-        }, 2000);
+        onShowTooltip(member, rect);
     };
 
     const handleMouseLeave = () => {
-        if (timerRef.current) clearTimeout(timerRef.current);
         if (onHideTooltip) onHideTooltip();
     };
 
@@ -1608,7 +1603,7 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                         <span>{member.class}</span>
                         <span>•</span>
-                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} CP</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
                     </div>
                 </div>
             </div>
@@ -1616,20 +1611,39 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
             {/* Availability */}
             <div className="mb-4">
                 <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
-                <div className="grid grid-cols-4 gap-1">
+                <div className="space-y-2">
                     {['수', '목', '금', '토', '일', '월', '화'].map(day => {
                         const slots = member.availability?.[day] || [];
-                        const hasSlots = slots.length > 0;
+                        if (slots.length === 0) return null;
+
+                        // Sort slots numerically (assuming IDs like "13", "14")
+                        const sortedSlots = [...slots].sort((a, b) => parseInt(a) - parseInt(b));
+
                         return (
-                            <div key={day} className={cn(
-                                "text-center p-1 rounded text-[10px] font-bold border",
-                                hasSlots ? "bg-indigo-50 border-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300" : "bg-slate-50 border-slate-100 text-slate-300 dark:bg-slate-800/50 dark:border-slate-800 dark:text-slate-600 opacity-50"
-                            )}>
-                                {day}
-                                {hasSlots && <span className="block text-[9px] font-normal leading-none mt-0.5">{slots.length}T</span>}
+                            <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
+                                <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
+                                <div className="flex flex-wrap gap-1 flex-1">
+                                    {sortedSlots.map(t => {
+                                        const slotLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
+                                        // Remove "오후 " for brevity if desired, or keep it. User asked "13시" style. 
+                                        // The labels are "오후 6:30". Let's convert or use just the time part if possible, or mapping.
+                                        // Constants: { id: 'wd1', label: '오후 6:30' }
+                                        // If user wants "13시", I might need a custom mapping or just show the label.
+                                        // "wd1시" was because `t` was "wd1".
+                                        // Let's use the label but strips "오후 " to save space or just use the label.
+                                        return (
+                                            <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
+                                                {slotLabel}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         );
                     })}
+                    {!['수', '목', '금', '토', '일', '월', '화'].some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                        <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
+                    )}
                 </div>
             </div>
 
