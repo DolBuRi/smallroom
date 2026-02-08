@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Users, Trophy, Sword, Calendar, LayoutDashboard, LogIn, LogOut, Calculator, Bell, Moon, Sun } from 'lucide-react';
+import { Users, Trophy, Sword, Calendar, LayoutDashboard, LogIn, LogOut, Calculator, Bell, Moon, Sun, List as ListIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import RaidManager from '@/components/raid-manager';
@@ -128,11 +128,8 @@ export default function Home() {
             <NavButton active={activeTab === 'raid_apply'} onClick={() => setActiveTab('raid_apply')} icon={<Calendar size={20} />}>
               성역 파티 신청하기
             </NavButton>
-            <NavButton active={activeTab === 'raid'} onClick={() => setActiveTab('raid')} icon={<Sword size={20} />}>
-              성역 파티 도우미
-            </NavButton>
-            <NavButton active={activeTab === 'raid_v2'} onClick={() => setActiveTab('raid_v2')} icon={<Sword size={20} />}>
-              성역 파티 도우미 VER2
+            <NavButton active={activeTab === 'raid_v2'} onClick={() => setActiveTab('raid_v2')} icon={<ListIcon size={20} />}>
+              성역 신청 현황
             </NavButton>
             <NavButton active={activeTab === 'party_maker'} onClick={() => setActiveTab('party_maker')} icon={<Trophy size={20} />}>
               성역 파티 매칭

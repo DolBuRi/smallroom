@@ -173,23 +173,28 @@ const HeatmapCell = ({
 
             {/* Tooltip: Applicant List */}
             {totalCount > 0 && (
-                <div className="absolute left-1/2 bottom-[calc(100%+8px)] -translate-x-1/2 w-48 bg-white dark:bg-slate-900/95 backdrop-blur text-slate-900 dark:text-white text-xs rounded-xl p-3 shadow-xl border border-slate-200 dark:border-slate-800 opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 transition-all z-50">
-                    <div className="font-bold text-slate-500 dark:text-slate-400 mb-2 border-b border-slate-100 dark:border-slate-700 pb-1 flex justify-between">
-                        <span>{day}요일({getDayDate(day)})</span>
-                        <span className="text-indigo-600 dark:text-indigo-400">{totalCount}명</span>
-                    </div>
-                    <div className="space-y-1 max-h-[200px] overflow-y-auto custom-scrollbar">
-                        {apps.map(app => (
-                            <div key={app.id} className="flex justify-between items-center">
-                                <span className="text-slate-700 dark:text-slate-300 font-medium">{app.nickname}</span>
-                                <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm", getClassColor(app.class))}>
-                                    {app.class}
-                                </span>
-                            </div>
-                        ))}
+                <div className="absolute left-1/2 bottom-[calc(100%-8px)] -translate-x-1/2 w-52 opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto transition-all duration-200 z-50">
+                    {/* Safe Zone Bridge (Invisible) */}
+                    <div className="absolute top-full left-0 w-full h-4 bg-transparent" />
+
+                    <div className="bg-white dark:bg-slate-900/95 backdrop-blur text-slate-900 dark:text-white text-xs rounded-xl p-3 shadow-xl border border-slate-200 dark:border-slate-800">
+                        <div className="font-bold text-slate-500 dark:text-slate-400 mb-2 border-b border-slate-100 dark:border-slate-700 pb-1 flex justify-between items-center">
+                            <span>{day}요일 <span className="text-[10px] font-normal">({getDayDate(day)})</span></span>
+                            <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded text-[10px]">{totalCount}명</span>
+                        </div>
+                        <div className="space-y-1 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
+                            {apps.map(app => (
+                                <div key={app.id} className="flex justify-between items-center hover:bg-slate-50 dark:hover:bg-slate-800/50 p-1 rounded transition-colors">
+                                    <span className="text-slate-700 dark:text-slate-300 font-bold">{app.nickname}</span>
+                                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm", getClassColor(app.class))}>
+                                        {app.class}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                     {/* Arrow */}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-white dark:border-t-slate-900/95 drop-shadow-sm" />
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-4 border-8 border-transparent border-t-white dark:border-t-slate-900/95 drop-shadow-sm pointer-events-none" />
                 </div>
             )}
         </div>
@@ -300,7 +305,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 <div>
                     <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
                         <Grid3X3 className="text-indigo-500 dark:text-indigo-400" size={32} />
-                        성역 파티 도우미 VER2
+                        성역 신청 현황
                         {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse">TEST MODE</span>}
                     </h2>
                     <p className="text-slate-500 dark:text-slate-300 text-sm font-medium mt-2 flex items-center gap-2">
