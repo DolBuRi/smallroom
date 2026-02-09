@@ -571,6 +571,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [selectedFixedGroupId, setSelectedFixedGroupId] = useState<string | null>(null);
     const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
     const [isFixedGroupsLoaded, setIsFixedGroupsLoaded] = useState(false);
+    const [isAlgoLoaded, setIsAlgoLoaded] = useState(false); // Added for persistence
+    const [serverVersion, setServerVersion] = useState(0); // Added for Version Sync
     const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
     // --- Filters ---
@@ -737,22 +739,32 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             return;
         }
 
-        const matchingRef = ref(db, 'raid_matching_session/parties');
-        const unsubscribe = onValue(matchingRef, (snap) => {
+        const sessionRef = ref(db, 'raid_matching_session');
+        const unsubscribe = onValue(sessionRef, (snap) => {
             const data = snap.val();
-            if (data && Array.isArray(data)) {
+            if (data && data.parties && Array.isArray(data.parties)) {
                 // Sanitize: Firebase might omit empty arrays
-                const sanitized = data.map((p: any) => ({
+                const sanitized = data.parties.map((p: any) => ({
                     ...p,
                     members: p.members || []
                 }));
                 setParties(sanitized);
+                setServerVersion(data.version || 0);
+            } else if (data && data.parties) {
+                // handle non-array if somehow corrupted but parties exist
             } else {
                 const initialParties = Array.from({ length: 4 }, (_, i) => ({
                     id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
                 }));
-                if (isAdmin) set(matchingRef, initialParties);
-                else setParties(initialParties);
+                if (isAdmin) {
+                    set(sessionRef, {
+                        parties: initialParties,
+                        version: 1
+                    });
+                } else {
+                    setParties(initialParties);
+                    setServerVersion(0);
+                }
             }
         });
 
@@ -781,13 +793,43 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         setPool(uiFilteredPool);
     }, [applications, parties, searchTerm, filterClass, selectedDay]);
 
-    // 4. Save Helper
-    const saveMatchingState = (updatedParties: Party[]) => {
-        if (!isAdmin || testMode) return;
-        // Firebase does not allow 'undefined' values.
-        // We use JSON trick to remove undefined properties recursively.
-        const serialized = JSON.parse(JSON.stringify(updatedParties));
-        set(ref(db, 'raid_matching_session/parties'), serialized);
+    // 4. Save Helper with Version Check (Method C)
+    const saveMatchingState = async (updatedParties: Party[]) => {
+        if (!isAdmin || testMode) return false;
+
+        try {
+            const sessionRef = ref(db, 'raid_matching_session');
+            const snapshot = await get(sessionRef);
+            const data = snapshot.val();
+            const remoteVersion = data?.version || 0;
+
+            // version check
+            if (remoteVersion > serverVersion) {
+                setConfirmationModal({
+                    isOpen: true,
+                    isDanger: true,
+                    title: "⚠️ 데이터 동기화 충돌",
+                    message: (
+                        <div className="space-y-2">
+                            <p>다른 관리자가 데이터를 수정했습니다.</p>
+                            <p className="text-xs text-slate-500">현재 버전: {serverVersion} / 서버 버전: {remoteVersion}</p>
+                            <p className="font-bold text-rose-600">최신 데이터를 불러오기 위해 새로고침이 필요합니다.</p>
+                        </div>
+                    ),
+                    onConfirm: () => window.location.reload(),
+                    onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false })),
+                });
+                return false;
+            }
+
+            const serializedParties = JSON.parse(JSON.stringify(updatedParties));
+            await set(ref(db, 'raid_matching_session/parties'), serializedParties);
+            await set(ref(db, 'raid_matching_session/version'), remoteVersion + 1);
+            return true;
+        } catch (e) {
+            console.error("Save failed", e);
+            return false;
+        }
     };
 
     // 2. Load Fixed Groups (One-time or Mock)
@@ -835,6 +877,31 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         loadFixedGroups();
     }, [testMode]);
 
+    // 2.5 Load Algo Settings from DB
+    useEffect(() => {
+        if (testMode) {
+            setIsAlgoLoaded(true);
+            return;
+        }
+
+        const loadAlgoSettings = async () => {
+            try {
+                const snapshot = await get(ref(db, 'raid_matching_session/algo_settings'));
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    if (Array.isArray(data)) {
+                        setAlgoCards(data);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load algo settings", e);
+            } finally {
+                setIsAlgoLoaded(true);
+            }
+        };
+        loadAlgoSettings();
+    }, [testMode]);
+
     useEffect(() => {
         if (!isFixedGroupsLoaded) return;
         if (testMode || !isAdmin) return; // Disable Save in Test Mode or if not Admin
@@ -843,6 +910,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const serialized = JSON.parse(JSON.stringify(fixedGroups));
         set(ref(db, 'raid_fixed_groups'), serialized);
     }, [fixedGroups, isFixedGroupsLoaded, testMode, isAdmin]);
+
+    // Sync Algo Settings to DB
+    useEffect(() => {
+        if (!isAlgoLoaded) return;
+        if (testMode || !isAdmin) return;
+
+        const serialized = JSON.parse(JSON.stringify(algoCards));
+        set(ref(db, 'raid_matching_session/algo_settings'), serialized);
+    }, [algoCards, isAlgoLoaded, testMode, isAdmin]);
 
 
     // --- Sync Fixed Groups to Members ---
@@ -980,8 +1056,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
         }
 
-        saveMatchingState(newParties);
-        setParties(newParties);
+        saveMatchingState(newParties).then(success => {
+            if (success) {
+                setParties(newParties);
+            }
+        });
     };
 
     // --- Algo Handlers ---
@@ -1290,13 +1369,23 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const groupMembers = candidates.filter(m => m.fixedGroupId === gid);
             if (groupMembers.length === 0) return;
 
-            // Find a party with enough space (Integrity Check)
-            const targetParty = partiesToMatch.find(p => p.members.length + groupMembers.length <= 4);
+            // Distribute within the Force (p1, p2)
+            groupMembers.forEach(m => {
+                const isCleric = m.class === '치유성';
+                const targetParty = partiesToMatch.find(p => {
+                    if (isCleric) {
+                        return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
+                    } else {
+                        // Regular members only go to slots 1-3
+                        return p.members.length < 3;
+                    }
+                });
 
-            if (targetParty) {
-                targetParty.members.push(...groupMembers);
-                groupMembers.forEach(m => usedIds.push(m.id));
-            }
+                if (targetParty) {
+                    targetParty.members.push(m);
+                    usedIds.push(m.id);
+                }
+            });
         });
         return usedIds;
     };
@@ -1340,23 +1429,33 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     // Weighted Random Fill (Balance) - Logic similar to before but iterates
     const matchPowerBalance = (partiesToMatch: Party[], candidates: Member[]) => {
         let usedIds: string[] = [];
-        // Continue until all parties full or no candidates
-        while (candidates.length > 0 && partiesToMatch.some(p => p.members.length < 4)) {
-            const member = candidates.find(m => !usedIds.includes(m.id));
-            if (!member) break;
+        const sorted = [...candidates].sort((a, b) => b.power - a.power);
 
-            // Find target party with lowest power among those with space
-            const availableParties = partiesToMatch.filter(p => p.members.length < 4);
-            if (availableParties.length === 0) break;
+        for (const m of sorted) {
+            if (usedIds.includes(m.id)) continue;
+
+            const isCleric = m.class === '치유성';
+
+            // Find target party with lowest power among those with valid space
+            const availableParties = partiesToMatch.filter(p => {
+                const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
+                if (isCleric) {
+                    return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
+                } else {
+                    return nonClericCount < 3;
+                }
+            });
+
+            if (availableParties.length === 0) continue;
 
             const targetParty = availableParties.reduce((prev, curr) => {
-                const prevPower = prev.members.reduce((sum, m) => sum + m.power, 0);
-                const currPower = curr.members.reduce((sum, m) => sum + m.power, 0);
+                const prevPower = prev.members.reduce((sum, pm) => sum + pm.power, 0);
+                const currPower = curr.members.reduce((sum, pm) => sum + pm.power, 0);
                 return prevPower <= currPower ? prev : curr;
             });
 
-            targetParty.members.push(member);
-            usedIds.push(member.id);
+            targetParty.members.push(m);
+            usedIds.push(m.id);
         }
         return usedIds;
     };
@@ -1406,10 +1505,24 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         });
 
         for (const p of partiesToMatch) {
-            while (p.members.length < 4 && sorted.length > 0) {
-                const m = sorted.shift()!;
-                p.members.push(m);
-                used.push(m.id);
+            while (sorted.length > 0) {
+                const m = sorted[0];
+                const isCleric = m.class === '치유성';
+                const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
+
+                let canAdd = false;
+                if (isCleric) {
+                    canAdd = p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
+                } else {
+                    canAdd = nonClericCount < 3;
+                }
+
+                if (canAdd) {
+                    p.members.push(sorted.shift()!);
+                    used.push(m.id);
+                } else {
+                    break; // This party is full for this type of member
+                }
             }
         }
         return used;
@@ -1420,7 +1533,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const tanks = candidates.filter(m => ['수호성', '검성'].includes(m.class)).sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
             if (p.members.some(m => ['수호성', '검성'].includes(m.class))) return;
-            if (p.members.length < 4 && tanks.length > 0) {
+            // Cap at 3 for non-cleric slots
+            if (p.members.length < 3 && tanks.length > 0) {
                 const t = tanks.shift()!;
                 p.members.push(t);
                 used.push(t.id);
@@ -1434,6 +1548,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const clerics = candidates.filter(m => m.class === '치유성').sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
             if (p.members.some(m => m.class === '치유성')) return;
+            // Cleric is the ONLY one who can fill up to 4
             if (p.members.length < 4 && clerics.length > 0) {
                 const c = clerics.shift()!;
                 p.members.push(c);
@@ -1447,7 +1562,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const used: string[] = [];
         const chanters = candidates.filter(m => m.class === '호법성').sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
-            if (p.members.length >= 4) return;
+            // Cap at 3 for Chanters (unless they are clerics, but they aren't)
+            if (p.members.length >= 3) return;
             const hasGladTank = p.members.some(m => m.class === '검성');
             const hasTemplar = p.members.some(m => m.class === '수호성');
             const hasChanter = p.members.some(m => m.class === '호법성');
@@ -1463,7 +1579,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const matchCombatLogic = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
         partiesToMatch.forEach(p => {
-            if (p.members.length >= 4) return;
+            // Cap at 3
+            if (p.members.length >= 3) return;
             const melees = p.members.filter(m => ['수호성', '검성', '살성', '호법성'].includes(m.class)).length;
             const ranges = p.members.filter(m => ['마도성', '정령성', '궁성'].includes(m.class)).length;
             let targetType = '';
@@ -1630,6 +1747,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
             // 5. Final Fallback (Always fill if empty)
             if (candidates.length > 0 && (p1.members.length < 4 || p2.members.length < 4)) {
+                // Note: matchPowerBalance already respects the 3-non-cleric limit in its updated logic
                 const leftovers = matchPowerBalance([p1, p2], candidates);
                 if (leftovers.length > 0) {
                     workingPool = workingPool.filter(m => !leftovers.includes(m.id));
@@ -1638,9 +1756,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         });
 
         // Update State
-        saveMatchingState(workingParties);
-        setParties([...workingParties]);
-        setIsAutoMatchModalOpen(false); // Close selection modal immediately
+        // Update State
+        saveMatchingState(workingParties).then(success => {
+            if (success) {
+                setParties([...workingParties]);
+                setIsAutoMatchModalOpen(false); // Close selection modal immediately
+            }
+        });
     };
 
     const resetAll = () => {
@@ -1652,10 +1774,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             assignedDay: undefined,
             assignedTime: undefined
         }));
-        saveMatchingState(initialParties);
-        setParties(initialParties);
-        // Reset selected slot
-        setSelectedSlot(undefined);
+        saveMatchingState(initialParties).then(success => {
+            if (success) {
+                setParties(initialParties);
+                // Reset selected slot
+                setSelectedSlot(undefined);
+            }
+        });
     };
 
     const addForce = () => {
@@ -1673,8 +1798,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             { id: `party-${nextParty2Num}`, name: `${nextParty2Num}파티`, members: [] }
         ];
 
-        saveMatchingState(updatedParties);
-        setParties(updatedParties);
+        saveMatchingState(updatedParties).then(success => {
+            if (success) {
+                setParties(updatedParties);
+            }
+        });
     };
 
     const removeForce = (forceIdx: number) => {
@@ -1696,9 +1824,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 name: `${idx + 1}파티`
             }));
 
-            saveMatchingState(reindexed);
-            setParties(reindexed);
-            setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+            saveMatchingState(reindexed).then(success => {
+                if (success) {
+                    setParties(reindexed);
+                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                }
+            });
         };
 
         if (membersToReturn.length > 0) {

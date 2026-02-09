@@ -497,9 +497,11 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                         성역 신청 현황
                         {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse">TEST MODE</span>}
                     </h2>
-                    <p className="text-slate-500 dark:text-slate-300 text-sm font-medium mt-2 flex items-center gap-2">
-                        주간 신청 현황을 한눈에 확인하세요. (캘린더 뷰 & 상세 목록)
-                    </p>
+                    <div className="mt-[17px]">
+                        <p className="text-slate-500 dark:text-slate-300 text-sm font-medium flex items-center gap-2">
+                            주간 신청 현황을 한눈에 확인하세요. (캘린더 뷰 & 상세 목록)
+                        </p>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3">
                     {isAdmin && !testMode && (
