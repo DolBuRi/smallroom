@@ -312,14 +312,22 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                         주간 신청 현황을 한눈에 확인하세요. (캘린더 뷰 & 상세 목록)
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-3">
                     {isAdmin && !testMode && (
                         <>
-                            <button onClick={generateDummyData} className="px-4 py-2 bg-indigo-50 text-indigo-500 rounded-xl text-xs font-black">
+                            <button
+                                onClick={generateDummyData}
+                                className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black hover:bg-indigo-100 dark:hover:bg-indigo-800/30 transition-colors flex items-center gap-2"
+                            >
+                                <Zap size={14} />
                                 [DB] 더미 생성
                             </button>
-                            <button onClick={handleResetAll} className="px-4 py-2 bg-slate-50 text-slate-400 rounded-xl text-xs font-black">
-                                초기화
+                            <button
+                                onClick={handleResetAll}
+                                className="px-4 py-2.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-black hover:bg-rose-100 dark:hover:bg-rose-800/30 transition-colors flex items-center gap-2 border border-rose-100 dark:border-rose-900/30 shadow-sm"
+                            >
+                                <X size={14} className="stroke-[3px]" />
+                                신청 정보 초기화
                             </button>
                         </>
                     )}
