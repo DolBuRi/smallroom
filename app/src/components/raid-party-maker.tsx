@@ -244,7 +244,7 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
 
                     <div className={cn(
                         "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
-                        party.members.some(m => ['치유성', '호법성'].includes(m.class))
+                        party.members.some(m => m.class === '치유성')
                             ? "bg-green-100 border-green-200 text-green-600 shadow-sm shadow-green-100" // Active
                             : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
                     )}>
@@ -264,7 +264,7 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
                         key={m.id}
                         member={m}
                         fixedGroups={fixedGroups}
-                        isReadOnly={!isAdmin}
+                        isReadOnly={false}
                         onShowTooltip={onShowTooltip}
                         onHideTooltip={onHideTooltip}
                         assignedDay={assignedDay}
@@ -393,7 +393,7 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
                 <div className="flex items-baseline justify-between">
                     <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate">{member.name}</span>
                     <div className="flex items-center gap-1.5">
-                        {fixedGroup && !isConflict && (
+                        {fixedGroup && (
                             <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
                         )}
                         <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
@@ -548,7 +548,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [isAutoMatchModalOpen, setIsAutoMatchModalOpen] = useState(false);
     const [isAlgoSettingsModalOpen, setIsAlgoSettingsModalOpen] = useState(false);
     const [isFixedGroupModalOpen, setIsFixedGroupModalOpen] = useState(false);
-    const [confirmationModal, setConfirmationModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void; onCancel: () => void }>({ isOpen: false, message: '', onConfirm: () => { }, onCancel: () => { } });
+    const [confirmationModal, setConfirmationModal] = useState<{
+        isOpen: boolean;
+        title?: string;
+        message: React.ReactNode;
+        onConfirm: () => void;
+        onCancel: () => void;
+        isDanger?: boolean
+    }>({ isOpen: false, message: '', onConfirm: () => { }, onCancel: () => { } });
 
     // Filters & Options
     const [selectedDay, setSelectedDay] = useState<string>('ALL'); // Default to ALL
@@ -593,6 +600,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         member: Member | null;
         targetPartyId: string | null;
     }>({ isOpen: false, member: null, targetPartyId: null });
+
+    const [copySuccess, setCopySuccess] = useState(false);
 
     const handleConfirmTimeSelection = (day: string, time: string) => {
         if (!timeSelectionModal.member || !timeSelectionModal.targetPartyId) return;
@@ -707,22 +716,79 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         });
 
                         setApplications(applicantList);
-                        setPool(applicantList);
                     } else {
                         setApplications([]);
-                        setPool([]);
                     }
                 }, { onlyOnce: true });
 
-                // Init Parties (Default 2 Forces = 4 Parties)
-                setParties(Array.from({ length: 4 }, (_, i) => ({
-                    id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
-                })));
+                // Init Parties in loadMembers removed in favor of real-time sync EFFECT below
 
             }, { onlyOnce: true });
         };
         loadMembers();
     }, [testMode]);
+
+    // 2. Real-time Sync for Parties
+    useEffect(() => {
+        if (testMode) {
+            setParties(Array.from({ length: 4 }, (_, i) => ({
+                id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
+            })));
+            return;
+        }
+
+        const matchingRef = ref(db, 'raid_matching_session/parties');
+        const unsubscribe = onValue(matchingRef, (snap) => {
+            const data = snap.val();
+            if (data && Array.isArray(data)) {
+                // Sanitize: Firebase might omit empty arrays
+                const sanitized = data.map((p: any) => ({
+                    ...p,
+                    members: p.members || []
+                }));
+                setParties(sanitized);
+            } else {
+                const initialParties = Array.from({ length: 4 }, (_, i) => ({
+                    id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
+                }));
+                if (isAdmin) set(matchingRef, initialParties);
+                else setParties(initialParties);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [testMode, isAdmin]);
+
+    // 3. Derived Pool: Automatically calculate rest members from applications
+    useEffect(() => {
+        if (applications.length === 0) {
+            setPool([]);
+            return;
+        }
+
+        const assignedIds = new Set(parties.flatMap(p => (p.members || []).map(m => m.id)));
+        const newPool = applications.filter(a => !assignedIds.has(a.id));
+
+        // Apply UI Filters
+        const uiFilteredPool = newPool.filter(m => {
+            const matchSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchClass = filterClass === 'ALL' || m.class === filterClass;
+            const matchSchedule = selectedDay === 'ALL' || (m.availability?.[selectedDay]?.length || 0) > 0;
+            return matchSearch && matchClass && matchSchedule;
+        });
+
+        uiFilteredPool.sort((a, b) => b.power - a.power);
+        setPool(uiFilteredPool);
+    }, [applications, parties, searchTerm, filterClass, selectedDay]);
+
+    // 4. Save Helper
+    const saveMatchingState = (updatedParties: Party[]) => {
+        if (!isAdmin || testMode) return;
+        // Firebase does not allow 'undefined' values.
+        // We use JSON trick to remove undefined properties recursively.
+        const serialized = JSON.parse(JSON.stringify(updatedParties));
+        set(ref(db, 'raid_matching_session/parties'), serialized);
+    };
 
     // 2. Load Fixed Groups (One-time or Mock)
     useEffect(() => {
@@ -769,19 +835,20 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         loadFixedGroups();
     }, [testMode]);
 
-    // 3. Auto-Save Fixed Groups
     useEffect(() => {
         if (!isFixedGroupsLoaded) return;
-        if (testMode) return; // Disable Save in Test Mode
-        set(ref(db, 'raid_fixed_groups'), fixedGroups);
-    }, [fixedGroups, isFixedGroupsLoaded, testMode]);
+        if (testMode || !isAdmin) return; // Disable Save in Test Mode or if not Admin
+
+        // Remove undefined values before saving to Firebase
+        const serialized = JSON.parse(JSON.stringify(fixedGroups));
+        set(ref(db, 'raid_fixed_groups'), serialized);
+    }, [fixedGroups, isFixedGroupsLoaded, testMode, isAdmin]);
 
 
     // --- Sync Fixed Groups to Members ---
     useEffect(() => {
         if (!isMounted || allMembers.length === 0) return;
 
-        // Use a simple check to prevent infinite loop
         const fixedMap = new Map<string, string>();
         fixedGroups.forEach(fg => {
             (fg.memberIds || []).forEach(mid => fixedMap.set(mid, fg.id));
@@ -802,17 +869,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         const anyUpdateNeeded = allMembers.some(checkNeedsUpdate) ||
             pool.some(checkNeedsUpdate) ||
-            parties.some(p => p.members.some(checkNeedsUpdate));
+            parties.some(p => (p.members || []).some(checkNeedsUpdate));
 
         if (anyUpdateNeeded) {
-            requestAnimationFrame(() => {
-                setAllMembers(prev => prev.map(updateMember));
-                setPool(prev => prev.map(updateMember));
-                setParties(prev => prev.map(p => ({
+            setAllMembers(prev => prev.some(checkNeedsUpdate) ? prev.map(updateMember) : prev);
+            setPool(prev => prev.some(checkNeedsUpdate) ? prev.map(updateMember) : prev);
+            setParties(prev => prev.some(p => (p.members || []).some(checkNeedsUpdate))
+                ? prev.map(p => ({
                     ...p,
-                    members: p.members.map(updateMember)
-                })));
-            });
+                    members: (p.members || []).map(updateMember)
+                }))
+                : prev
+            );
         }
     }, [isMounted, fixedGroups, isFixedGroupsLoaded, allMembers, pool, parties]);
 
@@ -820,6 +888,19 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const getSlotLabel = (id: string) => {
         const slot = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === id);
         return slot ? slot.label : id;
+    };
+
+    const getDayDate = (dayName: string) => {
+        const days = ['일', '월', '화', '수', '목', '금', '토'];
+        const targetIdx = days.indexOf(dayName);
+        if (targetIdx === -1) return '';
+        const now = new Date();
+        const currentDayIdx = now.getDay();
+        let diff = targetIdx - currentDayIdx;
+        if (diff < 0) diff += 7;
+        const d = new Date(now);
+        d.setDate(now.getDate() + diff);
+        return `${d.getMonth() + 1}/${d.getDate()}`;
     };
 
     const findMember = (id: string) => {
@@ -843,14 +924,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const member = findMember(memberId);
         if (!member) return;
 
-        let newPool = [...pool];
         let newParties = parties.map(p => ({ ...p, members: [...p.members] }));
 
         // Remove from Source
         const sourceContainer = findContainer(memberId);
-        if (sourceContainer === 'pool') {
-            newPool = newPool.filter(m => m.id !== memberId);
-        } else if (sourceContainer) {
+        if (sourceContainer && sourceContainer !== 'pool') {
             const p = newParties.find(p => p.id === sourceContainer);
             if (p) {
                 p.members = p.members.filter(m => m.id !== memberId);
@@ -858,16 +936,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         // Add to Target
-        if (targetContainerId === 'pool') {
-            newPool.push(member);
-            newPool.sort((a, b) => b.power - a.power);
-        } else {
+        if (targetContainerId !== 'pool') {
             const p = newParties.find(p => p.id === targetContainerId);
             if (p) {
                 if (p.members.length >= 4) {
-                    alert("파티는 최대 4명까지만 가능합니다.");
-                    // Return to source
-                    if (sourceContainer === 'pool') newPool.push(member);
+                    setConfirmationModal({
+                        isOpen: true,
+                        isDanger: true,
+                        title: "인원 초과",
+                        message: "한 파티는 최대 4명까지만 구성할 수 있습니다.",
+                        onConfirm: () => setConfirmationModal(prev => ({ ...prev, isOpen: false })),
+                        onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                    });
                     return;
                 }
                 p.members.push(member);
@@ -900,7 +980,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
         }
 
-        setPool(newPool);
+        saveMatchingState(newParties);
         setParties(newParties);
     };
 
@@ -1006,6 +1086,59 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         });
     };
 
+    const handleCopyForcesText = () => {
+        if (parties.length === 0) {
+            alert("구성된 포스가 없습니다.");
+            return;
+        }
+
+        let fullText = "";
+        const numForces = Math.ceil(parties.length / 2);
+
+        for (let i = 0; i < numForces; i++) {
+            const forceNumber = i + 1;
+            const p1 = parties[i * 2];
+            const p2 = parties[i * 2 + 1];
+
+            const forceDay = p1?.assignedDay || p2?.assignedDay;
+            const forceTime = p1?.assignedTime || p2?.assignedTime;
+
+            // Header: 5포스 - 일요일 오후 8시
+            const dayLabel = forceDay ? (forceDay + "요일") : "시간 미정";
+            const timeLabel = forceTime ? getSlotLabel(forceTime) : "";
+
+            fullText += `${forceNumber}포스 - ${dayLabel} ${timeLabel}\n\n`;
+
+            // Column Alignment (using a fixed width for the first column)
+            // Korean characters are wider, usually treated as 2 spaces in monospaced fonts.
+            // In KakaoTalk/Discord, we'll try to provide enough spacing.
+            for (let j = 0; j < 4; j++) {
+                const m1 = p1?.members[j];
+                const m2 = p2?.members[j];
+
+                const name1 = m1 ? m1.name : "(공팟인원)";
+                const name2 = m2 ? m2.name : "(공팟인원)";
+
+                // Heuristic padding: pad the first name to a certain length. 
+                // We'll use multiple spaces to ensure a visible gap.
+                const name1Display = name1.padEnd(16, ' ');
+                fullText += `${name1Display}  ${name2}\n`;
+            }
+
+            if (i < numForces - 1) {
+                fullText += "\n------------------------------\n";
+            }
+        }
+
+        navigator.clipboard.writeText(fullText.trim()).then(() => {
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 2000);
+        }).catch(err => {
+            console.error("Copy failed", err);
+            alert("복사에 실패했습니다. 브라우저 권한을 확인해주세요.");
+        });
+    };
+
     // toggleAlgo removed as we use status now, and clicking is not the primary interaction
     // const toggleAlgo = (id: string) => { ... }
 
@@ -1016,6 +1149,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     const handleDragEnd = (event: DragEndEvent) => {
+        if (!isAdmin) {
+            alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+            return;
+        }
         const { active, over } = event;
         setDraggedMember(null);
         if (!over) return;
@@ -1101,11 +1238,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                             // If target slot is NOT a common slot, but common slots exist
                             if (!commonSlots.includes(assignedTime) && commonSlots.length > 0) {
-                                const recommendedLabel = `${assignedDay} ${getSlotLabel(commonSlots[0])}`; // Show first common slot
+                                const recommendedLabel = `${assignedDay}(${getDayDate(assignedDay)}) ${getSlotLabel(commonSlots[0])}`; // Show first common slot
 
                                 setConfirmationModal({
                                     isOpen: true,
-                                    message: `고정 파티 '${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}' 멤버 전원이\n[${recommendedLabel}]에 참여 가능합니다.\n\n현재 선택한 ${assignedDay} ${getSlotLabel(assignedTime)}에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                    message: `고정 파티 [${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}] 멤버 전원이\n'${recommendedLabel}'에 참여 가능합니다.\n\n현재 선택한 시간대에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
                                     onConfirm: () => {
                                         executeMove(memberId, targetId);
                                         setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1121,7 +1258,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     if ((!member.availability?.[assignedDay]?.includes(assignedTime))) {
                         setConfirmationModal({
                             isOpen: true,
-                            message: `${member.name}님은 해당 시간(${assignedDay} ${getSlotLabel(assignedTime)})에 신청하지 않았습니다.\n강제 배정하시겠습니까?`,
+                            isDanger: true,
+                            message: (
+                                <>
+                                    {member.name}님은 포스 시간인 {assignedDay}({getDayDate(assignedDay)}) {getSlotLabel(assignedTime)}에<br />
+                                    <span className="text-rose-500 font-bold">신청하지 않았습니다.</span><br /><br />
+                                    강제로 배정하시겠습니까?
+                                </>
+                            ),
                             onConfirm: () => {
                                 executeMove(memberId, targetId);
                                 setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1494,22 +1638,22 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         });
 
         // Update State
+        saveMatchingState(workingParties);
         setParties([...workingParties]);
-        setPool(workingPool);
-        alert(`매칭 완료! (범위: ${matchType === 'DAY' ? '선택 요일' : '전체 일정'}, 방식: ${targetScope === 'RESHUFFLE' ? '전체 재분배' : '빈칸 채우기'})`);
+        setIsAutoMatchModalOpen(false); // Close selection modal immediately
     };
 
     const resetAll = () => {
-        // Return all party members to pool
-        setPool([...applications]);
         // Reset parties to default 4 slots (2 forces)
-        setParties(Array.from({ length: 4 }, (_, i) => ({
+        const initialParties = Array.from({ length: 4 }, (_, i) => ({
             id: `party-${i + 1}`,
             name: `${i + 1}파티`,
             members: [],
             assignedDay: undefined,
             assignedTime: undefined
-        })));
+        }));
+        saveMatchingState(initialParties);
+        setParties(initialParties);
         // Reset selected slot
         setSelectedSlot(undefined);
     };
@@ -1523,11 +1667,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const nextParty1Num = parties.length + 1;
         const nextParty2Num = parties.length + 2;
 
-        setParties([
+        const updatedParties = [
             ...parties,
             { id: `party-${nextParty1Num}`, name: `${nextParty1Num}파티`, members: [] },
             { id: `party-${nextParty2Num}`, name: `${nextParty2Num}파티`, members: [] }
-        ]);
+        ];
+
+        saveMatchingState(updatedParties);
+        setParties(updatedParties);
     };
 
     const removeForce = (forceIdx: number) => {
@@ -1541,12 +1688,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const membersToReturn = [...(p1?.members || []), ...(p2?.members || [])];
 
         const executeDelete = () => {
-            // Return members to pool
-            setPool(prev => {
-                const updated = [...prev, ...membersToReturn];
-                return updated.sort((a, b) => b.power - a.power);
-            });
-
             // Remove and Re-index
             const filtered = parties.filter((_, idx) => idx !== forceIdx * 2 && idx !== forceIdx * 2 + 1);
             const reindexed = filtered.map((p, idx) => ({
@@ -1555,6 +1696,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 name: `${idx + 1}파티`
             }));
 
+            saveMatchingState(reindexed);
             setParties(reindexed);
             setConfirmationModal(prev => ({ ...prev, isOpen: false }));
         };
@@ -1562,13 +1704,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         if (membersToReturn.length > 0) {
             setConfirmationModal({
                 isOpen: true,
-                message: `${forceIdx + 1}포스를 삭제하시겠습니까?\n배정된 멤버(${membersToReturn.length}명)는 대기 명단으로 돌아갑니다.`,
+                isDanger: true,
+                message: `[${forceIdx + 1}포스]를 삭제하시겠습니까?\n\n배정된 멤버(${membersToReturn.length}명)는 대기 명단으로 돌아갑니다.`,
                 onConfirm: executeDelete,
                 onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
             });
         } else {
-            // Even if empty, show a soft modal for consistency or just delete. 
-            // Let's show modal to avoid accidental clicks.
             setConfirmationModal({
                 isOpen: true,
                 message: `${forceIdx + 1}포스를 삭제하시겠습니까?`,
@@ -1610,6 +1751,16 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         // 3. Secondary Sort: Member's Own Power (within group or ties)
         return b.power - a.power;
     });
+
+    const { completedForcesCount, pendingForcesCount } = React.useMemo(() => {
+        const total = Math.ceil(parties.length / 2);
+        const completed = Array.from({ length: total }).filter((_, i) => {
+            const p1 = parties[i * 2];
+            const p2 = parties[i * 2 + 1];
+            return (p1?.members?.length || 0) + (p2?.members?.length || 0) === 8;
+        }).length;
+        return { completedForcesCount: completed, pendingForcesCount: total - completed };
+    }, [parties]);
 
     // --- Render ---
     return (
@@ -1756,7 +1907,20 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 {/* 2. Right: Party Canvas */}
                 <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
                     <div className="p-4 border-b flex justify-between items-center bg-white/50 dark:bg-slate-800/50">
-                        <h2 className="font-bold flex items-center gap-2"><Shield size={18} className="text-rose-500" /> 포스 구성 ({Math.ceil(parties.length / 2)})</h2>
+                        <div className="flex items-center gap-3">
+                            <h2 className="font-bold flex items-center gap-2">
+                                <Shield size={18} className="text-rose-500" />
+                                포스 구성
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                <span className="px-2.5 py-1 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-black rounded-none border border-slate-200 dark:border-slate-700 shadow-sm transition-all">
+                                    완성 : {completedForcesCount}개
+                                </span>
+                                <span className="px-2.5 py-1 bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-[11px] font-black rounded-none border border-slate-200 dark:border-slate-700 shadow-sm transition-all">
+                                    미완성 : {pendingForcesCount}개
+                                </span>
+                            </div>
+                        </div>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => {
@@ -1764,7 +1928,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 }}
                                 className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
                             >
-                                <Settings2 size={14} /> 매칭 알고리즘 수정
+                                <Settings2 size={14} /> 알고리즘 수정
                             </button>
                             <button
                                 onClick={() => {
@@ -1772,7 +1936,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 }}
                                 className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1"
                             >
-                                <Sparkles size={14} /> 자동 매칭 시작
+                                <Sparkles size={14} /> 자동 매칭 실행
                             </button>
                             <button
                                 onClick={() => {
@@ -1782,7 +1946,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                     }
                                     setConfirmationModal({
                                         isOpen: true,
-                                        message: "현재 구성된 모든 포스 정보가 초기화됩니다.\n정말로 진행하시겠습니까?",
+                                        isDanger: true,
+                                        message: "현재 구성된 모든 포스 정보가 초기화됩니다.\n\n정말로 진행하시겠습니까?",
                                         onConfirm: () => {
                                             resetAll();
                                             setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1846,6 +2011,41 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:text-rose-400 dark:border-rose-800 font-black animate-pulse flex items-center gap-1">
                                                     <AlertCircle size={10} /> 시간을 지정해 주세요
                                                 </span>
+                                            )}
+                                            {forceDay && forceTime && (
+                                                (() => {
+                                                    const members = [...(party1?.members || []), ...(party2?.members || [])];
+                                                    const conflictedMembers = members.filter(m => !m.availability?.[forceDay]?.includes(forceTime));
+                                                    if (conflictedMembers.length === 0) return null;
+
+                                                    return (
+                                                        <div className="relative group/conflict">
+                                                            <span className="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded border border-rose-600 font-black animate-pulse flex items-center gap-1 shadow-sm cursor-help transition-transform hover:scale-105 active:scale-95">
+                                                                <AlertTriangle size={10} /> 미신청자 포함
+                                                            </span>
+
+                                                            {/* Conflict List Tooltip */}
+                                                            <div className="absolute left-0 top-full mt-2 w-52 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-4 z-[150] opacity-0 translate-y-2 pointer-events-none group-hover/conflict:opacity-100 group-hover/conflict:translate-y-0 transition-all duration-200 ring-4 ring-black/5 dark:ring-white/5">
+                                                                <p className="text-[11px] font-black text-rose-500 dark:text-rose-400 mb-3 border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-1.5">
+                                                                    <Users size={12} className="text-rose-500" /> 확인 필요 인원 ({conflictedMembers.length})
+                                                                </p>
+                                                                <div className="space-y-2">
+                                                                    {conflictedMembers.map(m => (
+                                                                        <div key={m.id} className="flex items-center justify-between">
+                                                                            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200">{m.name}</span>
+                                                                            <span className="text-[9px] text-slate-500 dark:text-slate-400 font-bold px-1.5 py-0.5 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700/50">{m.class}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed whitespace-pre-line">
+                                                                    해당 인원은 {forceDay}({getNextDate(forceDay)}) {getSlotLabel(forceTime)}에{"\n"}신청하지 않았습니다.
+                                                                </div>
+                                                                {/* Triangle Arrow */}
+                                                                <div className="absolute -top-1 left-4 w-2.5 h-2.5 bg-white dark:bg-slate-900 border-l border-t border-slate-200 dark:border-slate-800 rotate-45" />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()
                                             )}
                                         </div>
 
@@ -2119,18 +2319,42 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             {/* Confirmation Modal */}
             {
                 confirmationModal.isOpen && (
-                    <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center animate-in fade-in duration-200">
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 dark:border-slate-700">
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center">
-                                    <AlertTriangle size={20} />
+                    <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200 dark:border-slate-800">
+                            <div className="p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className={cn(
+                                        "w-10 h-10 rounded-full flex items-center justify-center shadow-sm",
+                                        confirmationModal.isDanger ? "bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400" : "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400"
+                                    )}>
+                                        {confirmationModal.isDanger ? <AlertTriangle size={20} strokeWidth={2.5} /> : <CheckCircle size={20} strokeWidth={2.5} />}
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-0 tracking-tight">
+                                        {confirmationModal.title || (confirmationModal.isDanger ? "주의 필요" : "확인")}
+                                    </h3>
                                 </div>
-                                <h3 className="text-lg font-bold">확인 필요</h3>
-                            </div>
-                            <p className="text-slate-600 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">{confirmationModal.message}</p>
-                            <div className="flex gap-2 mt-6">
-                                <button onClick={confirmationModal.onCancel} className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 transition-colors">취소</button>
-                                <button onClick={confirmationModal.onConfirm} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors">확인</button>
+
+                                <div className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-8 px-1 font-medium whitespace-pre-wrap">
+                                    {confirmationModal.message}
+                                </div>
+
+                                <div className="flex justify-end gap-2 pt-2">
+                                    <button
+                                        onClick={confirmationModal.onCancel}
+                                        className="px-4 py-2 rounded-xl text-slate-500 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all active:scale-95"
+                                    >
+                                        취소
+                                    </button>
+                                    <button
+                                        onClick={confirmationModal.onConfirm}
+                                        className={cn(
+                                            "px-6 py-2 rounded-xl text-white font-black transition-all active:scale-95 shadow-md",
+                                            confirmationModal.isDanger ? "bg-rose-500 hover:bg-rose-600 shadow-rose-500/20" : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20"
+                                        )}
+                                    >
+                                        {confirmationModal.isDanger ? "확인" : "확인"}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2300,7 +2524,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                             // Custom Modal for confirmation
                                                                             setConfirmationModal({
                                                                                 isOpen: true,
-                                                                                message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n'${selectedGroup?.name}'(으)로 이동하시겠습니까?`,
+                                                                                message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n\n'${selectedGroup?.name}'(으)로 이동하시겠습니까?`,
                                                                                 onConfirm: () => {
                                                                                     setFixedGroups(prev => prev.map(fg => {
                                                                                         if (fg.id === otherGroup.id) {
@@ -2479,6 +2703,23 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     />
                 )
             }
+            {/* Floating Copy Button */}
+            <div className="fixed bottom-10 right-10 z-[100] flex flex-col items-end gap-3 pointer-events-none">
+                {copySuccess && (
+                    <div className="bg-slate-900/90 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-300 backdrop-blur-md border border-slate-700">
+                        📋 포스 구성표가 복사되었습니다!
+                    </div>
+                )}
+                <button
+                    onClick={handleCopyForcesText}
+                    className="pointer-events-auto group bg-indigo-600 dark:bg-indigo-500 text-white p-4 rounded-3xl shadow-2xl hover:scale-110 active:scale-95 transition-all flex items-center gap-3 overflow-hidden"
+                >
+                    <Copy size={22} className="group-hover:rotate-6 transition-transform" />
+                    <span className="max-w-0 overflow-hidden group-hover:max-w-[200px] transition-all duration-500 whitespace-nowrap font-black text-sm tracking-tight">
+                        포스 구성표 복사
+                    </span>
+                </button>
+            </div>
         </DndContext >
     );
 }

@@ -167,7 +167,7 @@ export default function Home() {
             <img
               src="/bunny_chu.png"
               alt="Chu Bunny"
-              className="w-[200%] max-w-none h-auto drop-shadow-2xl animate-in fade-in zoom-in duration-700 hover:scale-105 transition-transform origin-bottom -translate-x-3 translate-y-14"
+              className="w-[200%] max-w-none h-auto drop-shadow-2xl animate-in fade-in zoom-in duration-700 hover:scale-105 transition-transform origin-bottom -translate-x-3 translate-y-10"
             />
           </div>
 

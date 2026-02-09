@@ -25,6 +25,19 @@ interface RaidApplication {
 // Order: Wed -> Tue (AION Raid Week)
 const DAYS = ['수', '목', '금', '토', '일', '월', '화'];
 
+const WEEKDAY_SLOTS = [
+    { id: 'wd1', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
+    { id: 'wd2', label: '오후 8:30', fullLabel: '20:30 ~ 22:30', sortKey: 2030 },
+    { id: 'wd3', label: '오후 10:30', fullLabel: '22:30 ~ 00:30', sortKey: 2230 },
+];
+const WEEKEND_SLOTS = [
+    { id: 'we1', label: '오후 2:00', fullLabel: '14:00 ~ 16:00', sortKey: 1400 },
+    { id: 'we2', label: '오후 4:00', fullLabel: '16:00 ~ 18:00', sortKey: 1600 },
+    { id: 'we3', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
+    { id: 'we4', label: '오후 8:30', fullLabel: '20:30 ~ 22:30', sortKey: 2030 },
+    { id: 'we5', label: '오후 10:30', fullLabel: '22:30 ~ 00:30', sortKey: 2230 },
+];
+
 // Unified Time Rows
 const TIME_ROWS = [
     { label: '오후 2:00 ~ 4:00', isWeekendOnly: true, wkId: 'we1' },
@@ -88,11 +101,15 @@ const ClassIcon = ({ className }: { className: string }) => {
     );
 };
 
-const MemberCard = ({ member, compact = false }: { member: RaidApplication, compact?: boolean }) => (
-    <div className={cn(
-        "flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-lg shadow-sm transition-all hover:shadow-md",
-        compact ? "p-2 px-3" : "p-3 px-4"
-    )}>
+const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip }: { member: RaidApplication, compact?: boolean, onShowTooltip: (m: RaidApplication, r: DOMRect) => void, onHideTooltip: () => void }) => (
+    <div
+        onMouseEnter={(e) => onShowTooltip(member, e.currentTarget.getBoundingClientRect())}
+        onMouseLeave={onHideTooltip}
+        className={cn(
+            "flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-lg shadow-sm transition-all hover:shadow-md cursor-default",
+            compact ? "p-2 px-3" : "p-3 px-4"
+        )}
+    >
         <div className="flex items-center gap-3">
             <ClassIcon className={member.class} />
             <div className="flex flex-col">
@@ -111,16 +128,105 @@ const MemberCard = ({ member, compact = false }: { member: RaidApplication, comp
     </div>
 );
 
+function MemberDetailTooltip({ member, rect }: { member: RaidApplication, rect: DOMRect }) {
+    const tooltipWidth = 280;
+    let top = rect.top;
+    let left = rect.right + 10;
+
+    if (typeof window !== 'undefined') {
+        if (left + tooltipWidth > window.innerWidth - 20) {
+            left = rect.left - tooltipWidth - 10;
+        }
+        left = Math.max(10, left);
+
+        // Adjust top to prevent bottom overflow
+        const estimatedMaxHeight = 400;
+        if (top + estimatedMaxHeight > window.innerHeight - 20) {
+            top = window.innerHeight - estimatedMaxHeight - 20;
+        }
+        top = Math.max(20, top);
+    }
+
+    const style: React.CSSProperties = {
+        position: 'fixed',
+        top: top,
+        left: left,
+        zIndex: 9999,
+        pointerEvents: 'none',
+        maxHeight: 'calc(100vh - 40px)',
+        overflowY: 'auto',
+    };
+
+    return (
+        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-0 w-[280px] animate-in slide-in-from-left-2 duration-200 overflow-hidden">
+            <div className="p-4">
+                <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
+                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
+                        {member.class[0]}
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 dark:text-white">{member.nickname}</h3>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>{member.class}</span>
+                            <span>•</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                    <div className="space-y-2">
+                        {DAYS.map(day => {
+                            const slots = member.availability?.[day] || [];
+                            if (slots.length === 0) return null;
+
+                            const sortedSlots = [...slots].sort((a, b) => {
+                                const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
+                                const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
+                                return sortA - sortB;
+                            });
+
+                            return (
+                                <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
+                                    <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
+                                    <div className="flex flex-wrap gap-1 flex-1">
+                                        {sortedSlots.map(t => {
+                                            const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
+                                            return (
+                                                <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
+                                                    {sLabel}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {!DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                            <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const HeatmapCell = ({
     day,
     timeLabel,
     slotId,
     apps,
+    onShowTooltip,
+    onHideTooltip,
 }: {
     day: string,
     timeLabel: string,
     slotId: string | null,
     apps: RaidApplication[],
+    onShowTooltip: (day: string, apps: RaidApplication[], rect: DOMRect) => void,
+    onHideTooltip: () => void,
 }) => {
     if (!slotId) {
         return <div className="bg-slate-50/50 dark:bg-slate-900/20 border border-slate-100 dark:border-slate-800 rounded-lg h-full min-h-[80px]" />;
@@ -145,11 +251,12 @@ const HeatmapCell = ({
         }
     }
 
-
     return (
         <div
+            onMouseEnter={(e) => totalCount > 0 && onShowTooltip(day, apps, e.currentTarget.getBoundingClientRect())}
+            onMouseLeave={onHideTooltip}
             className={cn(
-                "group relative rounded-xl border-2 flex flex-col items-center justify-center p-2 min-h-[100px] transition-all cursor-default hover:scale-[1.02] hover:z-10 hover:shadow-xl",
+                "group relative rounded-xl border-2 flex flex-col items-center justify-center p-2 min-h-[100px] cursor-default transition-all hover:border-indigo-400 dark:hover:border-indigo-500 hover:z-[70] hover:shadow-2xl",
                 bgClass
             )}
         >
@@ -170,36 +277,85 @@ const HeatmapCell = ({
                 <span className="text-2xl font-black leading-none">{totalCount}</span>
                 <span className="text-xs opacity-60 font-bold mb-1">/8</span>
             </div>
-
-            {/* Tooltip: Applicant List */}
-            {totalCount > 0 && (
-                <div className="absolute left-1/2 bottom-[calc(100%-8px)] -translate-x-1/2 w-52 opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto transition-all duration-200 z-50">
-                    {/* Safe Zone Bridge (Invisible) */}
-                    <div className="absolute top-full left-0 w-full h-4 bg-transparent" />
-
-                    <div className="bg-white dark:bg-slate-900/95 backdrop-blur text-slate-900 dark:text-white text-xs rounded-xl p-3 shadow-xl border border-slate-200 dark:border-slate-800">
-                        <div className="font-bold text-slate-500 dark:text-slate-400 mb-2 border-b border-slate-100 dark:border-slate-700 pb-1 flex justify-between items-center">
-                            <span>{day}요일 <span className="text-[10px] font-normal">({getDayDate(day)})</span></span>
-                            <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded text-[10px]">{totalCount}명</span>
-                        </div>
-                        <div className="space-y-1 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
-                            {apps.map(app => (
-                                <div key={app.id} className="flex justify-between items-center hover:bg-slate-50 dark:hover:bg-slate-800/50 p-1 rounded transition-colors">
-                                    <span className="text-slate-700 dark:text-slate-300 font-bold">{app.nickname}</span>
-                                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm", getClassColor(app.class))}>
-                                        {app.class}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                    {/* Arrow */}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-4 border-8 border-transparent border-t-white dark:border-t-slate-900/95 drop-shadow-sm pointer-events-none" />
-                </div>
-            )}
         </div>
     );
 };
+
+function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave }: {
+    day: string,
+    apps: RaidApplication[],
+    rect: DOMRect,
+    onMouseEnter: () => void,
+    onMouseLeave: () => void
+}) {
+    const tooltipWidth = 220;
+
+    // Layout Calculation
+    let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+
+    // Default: Show ABOVE the cell (Standard Position)
+    let bottomValue: number | undefined = (typeof window !== 'undefined' ? window.innerHeight : 0) - rect.top + 8;
+    let topValue: number | undefined = undefined;
+
+    // Adjustment to stay inside viewport
+    if (typeof window !== 'undefined') {
+        // Horizontal clamping
+        if (left < 10) left = 10;
+        if (left + tooltipWidth > window.innerWidth - 10) left = window.innerWidth - tooltipWidth - 10;
+
+        // Vertical flip: If top area is too cramped (less than 300px), show BELOW instead
+        if (rect.top < 300) {
+            bottomValue = undefined;
+            topValue = rect.bottom + 8;
+        }
+    }
+
+    return (
+        <div
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            style={{
+                position: 'fixed',
+                top: topValue,
+                bottom: bottomValue,
+                left,
+                width: tooltipWidth,
+                zIndex: 9999,
+                pointerEvents: 'auto'
+            }}
+            className="animate-in fade-in zoom-in-95 duration-200"
+        >
+            {/* Safe Zone Bridge (Invisible) - Higher and better pointer events */}
+            <div
+                className="absolute left-0 w-full h-8 bg-transparent pointer-events-auto"
+                style={{
+                    top: bottomValue !== undefined ? '100%' : 'auto',
+                    bottom: topValue !== undefined ? '100%' : 'auto',
+                    transform: bottomValue !== undefined ? 'translateY(-4px)' : 'translateY(4px)'
+                }}
+            />
+            <div className="bg-white dark:bg-slate-900/95 backdrop-blur text-slate-900 dark:text-white text-xs rounded-xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-200 dark:border-slate-800">
+                <div className="font-bold text-slate-500 dark:text-slate-400 mb-2 border-b border-slate-100 dark:border-slate-700 pb-1 flex justify-between items-center">
+                    <span>{day}요일 <span className="text-[10px] font-normal">({getDayDate(day)})</span></span>
+                    <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded text-[10px]">{apps.length}명</span>
+                </div>
+                <div className="space-y-1 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
+                    {apps.map(app => (
+                        <div
+                            key={app.id}
+                            className="flex justify-between items-center p-1.5"
+                        >
+                            <span className="text-slate-700 dark:text-slate-300 font-bold">{app.nickname}</span>
+                            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm", getClassColor(app.class))}>
+                                {app.class}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // --- Main Component ---
 
@@ -212,6 +368,30 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     const [overviewViewMode, setOverviewViewMode] = useState<'slots' | 'list'>('slots');
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [resetConfirmText, setResetConfirmText] = useState('');
+
+    const [tooltipInfo, setTooltipInfo] = useState<{ member: RaidApplication, rect: DOMRect } | null>(null);
+    const [heatmapTooltipInfo, setHeatmapTooltipInfo] = useState<{ day: string, apps: RaidApplication[], rect: DOMRect } | null>(null);
+
+    // Use a ref to track the active tooltip state and prevent race conditions
+    const activeTooltipTimer = React.useRef<NodeJS.Timeout | null>(null);
+
+    const showHeatmapTooltip = (day: string, apps: RaidApplication[], rect: DOMRect) => {
+        if (activeTooltipTimer.current) {
+            clearTimeout(activeTooltipTimer.current);
+            activeTooltipTimer.current = null;
+        }
+        setHeatmapTooltipInfo({ day, apps, rect });
+    };
+
+    const hideHeatmapTooltip = () => {
+        // High grace period (300ms) to ensure stability even with fast/erratic mouse movement
+        if (activeTooltipTimer.current) clearTimeout(activeTooltipTimer.current);
+
+        activeTooltipTimer.current = setTimeout(() => {
+            setHeatmapTooltipInfo(null);
+            activeTooltipTimer.current = null;
+        }, 300);
+    };
 
     // Initial Data Sync
     useEffect(() => {
@@ -346,35 +526,34 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
             {/* RESET WARNING MODAL */}
             {isResetModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="p-10 flex flex-col items-center text-center">
-                            {/* Warning Icon */}
-                            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/30 rounded-full flex items-center justify-center mb-6 ring-8 ring-rose-50/50 dark:ring-rose-900/10">
-                                <AlertCircle size={40} className="text-rose-500 animate-pulse" />
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-full flex items-center justify-center text-rose-500 shadow-sm">
+                                    <AlertCircle size={20} className="stroke-[2.5px]" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-0">신청 정보를 초기화할까요?</h3>
                             </div>
 
-                            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-3">신청 정보를 초기화할까요?</h3>
-
-                            <div className="space-y-2 mb-8">
-                                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium leading-relaxed">
-                                    현재까지 접수된 <span className="text-rose-500 font-bold">모든 신청 내역과 매칭 결과</span>가<br />
-                                    영구적으로 삭제되며 복구할 수 없습니다.
+                            <div className="space-y-3 mb-6">
+                                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium leading-relaxed whitespace-pre-wrap">
+                                    현재까지 접수된 <span className="text-rose-500 font-bold">모든 신청 내역과 매칭 결과</span>가{"\n"}영구적으로 삭제되며 복구할 수 없습니다.
                                 </p>
-                                <p className="text-[11px] text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg mt-4">
-                                    새로운 주차의 레이드 매칭을 준비할 때만 사용해 주세요.
-                                </p>
+                                <div className="text-[11px] text-rose-600/80 dark:text-rose-400/80 bg-rose-50/50 dark:bg-rose-900/20 p-2.5 rounded-lg border border-rose-100/50 dark:border-rose-900/30">
+                                    새로운 주차의 레이드 매칭을 준비할 때만 사용해 주세요. 이 작업은 취소할 수 없습니다.
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 w-full">
+                            <div className="flex justify-end gap-2">
                                 <button
                                     onClick={() => setIsResetModalOpen(false)}
-                                    className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-bold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
+                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
                                 >
                                     취소
                                 </button>
                                 <button
                                     onClick={handleResetAll}
-                                    className="px-6 py-4 bg-rose-500 text-white font-black rounded-2xl shadow-lg shadow-rose-200 dark:shadow-none hover:bg-rose-600 transition-all active:scale-95 flex items-center justify-center gap-2"
+                                    className="px-6 py-2 bg-rose-500 text-white font-black rounded-xl shadow-lg shadow-rose-500/20 hover:bg-rose-600 transition-all active:scale-95 flex items-center justify-center gap-2"
                                 >
                                     지금 초기화
                                 </button>
@@ -437,6 +616,8 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                             timeLabel={row.label}
                                             slotId={slotId}
                                             apps={slotApps}
+                                            onShowTooltip={showHeatmapTooltip}
+                                            onHideTooltip={hideHeatmapTooltip}
                                         />
                                     );
                                 })}
@@ -525,7 +706,13 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                                         {slotApps.length > 0 ? (
                                                             <div className="space-y-2">
                                                                 {slotApps.map(app => (
-                                                                    <MemberCard key={app.id} member={app} compact />
+                                                                    <MemberCard
+                                                                        key={app.id}
+                                                                        member={app}
+                                                                        compact
+                                                                        onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
+                                                                        onHideTooltip={() => setTooltipInfo(null)}
+                                                                    />
                                                                 ))}
                                                             </div>
                                                         ) : (
@@ -548,7 +735,12 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     <div className="glass-panel p-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {dayApplicants.map(app => (
-                                <MemberCard key={app.id} member={app} />
+                                <MemberCard
+                                    key={app.id}
+                                    member={app}
+                                    onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
+                                    onHideTooltip={() => setTooltipInfo(null)}
+                                />
                             ))}
                             {dayApplicants.length === 0 && (
                                 <div className="col-span-full text-center py-20 text-slate-300">신청 내역이 없습니다.</div>
@@ -557,6 +749,28 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     </div>
                 )}
             </div>
+
+            {heatmapTooltipInfo && (
+                <HeatmapTooltip
+                    day={heatmapTooltipInfo.day}
+                    apps={heatmapTooltipInfo.apps}
+                    rect={heatmapTooltipInfo.rect}
+                    onMouseEnter={() => {
+                        if (activeTooltipTimer.current) {
+                            clearTimeout(activeTooltipTimer.current);
+                            activeTooltipTimer.current = null;
+                        }
+                    }}
+                    onMouseLeave={hideHeatmapTooltip}
+                />
+            )}
+
+            {tooltipInfo && (
+                <MemberDetailTooltip
+                    member={tooltipInfo.member}
+                    rect={tooltipInfo.rect}
+                />
+            )}
         </div>
     );
 }
