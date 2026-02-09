@@ -1599,14 +1599,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                 const member = allMembers.find(m => m.name === val || m.id === val);
                                                                 if (member) {
                                                                     // 1. Check if already in THIS group
-                                                                    if (selectedGroup.memberIds.includes(member.id)) {
+                                                                    if (selectedGroup.memberIds.includes(member.id) || selectedGroup.memberIds.includes(member.name)) {
                                                                         alert("이미 이 팀에 추가된 멤버입니다.");
                                                                         e.currentTarget.value = '';
                                                                         return;
                                                                     }
 
                                                                     // 2. Check if already in ANOTHER group
-                                                                    const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id));
+                                                                    const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id) || fg.memberIds.includes(member.name));
 
                                                                     if (otherGroup) {
                                                                         // Custom Modal for confirmation
@@ -1616,10 +1616,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                             onConfirm: () => {
                                                                                 setFixedGroups(prev => prev.map(fg => {
                                                                                     if (fg.id === otherGroup.id) {
-                                                                                        return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id) };
+                                                                                        return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id && id !== member.name) };
                                                                                     }
                                                                                     if (fg.id === selectedFixedGroupId) {
-                                                                                        return { ...fg, memberIds: [...fg.memberIds, member.id] };
+                                                                                        return { ...fg, memberIds: [...fg.memberIds, member.name] };
                                                                                     }
                                                                                     return fg;
                                                                                 }));
@@ -1640,7 +1640,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                         // 3. Just Add
                                                                         setFixedGroups(fixedGroups.map(fg =>
                                                                             fg.id === selectedFixedGroupId
-                                                                                ? { ...fg, memberIds: [...fg.memberIds, member.id] }
+                                                                                ? { ...fg, memberIds: [...fg.memberIds, member.name] }
                                                                                 : fg
                                                                         ));
                                                                         e.currentTarget.value = '';
@@ -1660,7 +1660,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                         </div>
                                                     ) : (
                                                         selectedGroup.memberIds.map(mid => {
-                                                            const member = allMembers.find(m => m.id === mid);
+                                                            const member = allMembers.find(m => m.id === mid || m.name === mid);
                                                             return (
                                                                 <div key={mid} className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
                                                                     <div className="flex items-center gap-2">
@@ -1988,9 +1988,9 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
         zIndex: 9999,
     };
 
-    // Find Fixed Group Members
+    // Find Fixed Group Members (Match by ID or Name for robustness)
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
-    const groupMembers = fixedGroup ? allMembers.filter(m => fixedGroup.memberIds.includes(m.id) && m.id !== member.id) : [];
+    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
 
     return (
         <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 w-[280px] animate-in slide-in-from-left-2 duration-200">
@@ -2056,8 +2056,8 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
                         <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
                     </h4>
                     <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-                        {groupMembers.length > 0 ? groupMembers.map(gm => (
-                            <div key={gm.id} className="flex justify-between items-center text-xs">
+                        {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                            <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
                                 <div className="flex items-center gap-2">
                                     <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
                                     <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
