@@ -445,11 +445,11 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
                     <ul className="text-sm font-bold text-slate-700 dark:text-slate-300 space-y-3">
                         <li className="flex gap-3 items-start">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                            <span className="break-keep leading-relaxed">참가 가능한 모든 시간대 체크 부탁드립니다.</span>
+                            <span className="break-keep leading-relaxed"><span className="text-red-500 font-black">참가 가능한 모든 시간대</span> 체크 부탁드립니다.</span>
                         </li>
                         <li className="flex gap-3 items-start">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                            <span className="break-keep leading-relaxed">시간대 선택 후 닉네임 입력 및 [신청 정보 제출] 버튼을 꼭 눌러주세요.</span>
+                            <span className="break-keep leading-relaxed"><span className="text-red-500 font-black">시간대 선택</span> 후 <span className="text-red-500 font-black">닉네임 입력</span> 및 <span className="text-red-500 font-black">[신청 정보 제출]</span> 버튼을 꼭 눌러주세요.</span>
                         </li>
                         <li className="flex gap-3 items-start">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />

@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle } from 'lucide-react';
+import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle, Link } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, get, child } from 'firebase/database';
@@ -129,8 +129,11 @@ function DroppableAlgoColumn({ id, items, children }: { id: string, items: AlgoC
     );
 }
 
-function SortableAlgoCard({ card, isOverlay = false }: { card: AlgoCard, isOverlay?: boolean }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+function SortableAlgoCard({ card, isAdmin, isOverlay = false }: { card: AlgoCard, isAdmin?: boolean, isOverlay?: boolean }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: card.id,
+        disabled: !isAdmin
+    });
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -152,24 +155,31 @@ function SortableAlgoCard({ card, isOverlay = false }: { card: AlgoCard, isOverl
                     <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
                     <GripVertical size={16} className="text-slate-300" />
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none whitespace-pre-wrap">{card.desc}</p>
             </div>
         );
     }
 
     return (
-        <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={cn(
-            "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all select-none group touch-none hover:shadow-md cursor-grab active:cursor-grabbing",
-            "border-slate-200 dark:border-slate-700",
-            card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
-            card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
-            card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300 opacity-80 hover:opacity-100"
-        )}>
+        <div ref={setNodeRef} style={style} {...attributes} {...listeners}
+            onClick={() => {
+                if (!isAdmin) {
+                    alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                }
+            }}
+            className={cn(
+                "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all select-none group touch-none",
+                "border-slate-200 dark:border-slate-700",
+                isAdmin ? "hover:shadow-md cursor-grab active:cursor-grabbing" : "cursor-default opacity-90",
+                card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
+                card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
+                card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300"
+            )}>
             <div className="flex justify-between items-start mb-2 pointer-events-none">
                 <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
                 <GripVertical size={16} className="text-slate-300" />
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none whitespace-pre-wrap">{card.desc}</p>
         </div>
     );
 }
@@ -333,6 +343,27 @@ const COLOR_MAP: Record<string, string> = {
     'bg-rose-500': 'border-rose-500'
 };
 
+const COLOR_MAP_TEXT: Record<string, string> = {
+    'bg-slate-500': 'text-slate-500',
+    'bg-red-500': 'text-red-500',
+    'bg-orange-500': 'text-orange-500',
+    'bg-amber-500': 'text-amber-500',
+    'bg-yellow-500': 'text-yellow-500',
+    'bg-lime-500': 'text-lime-500',
+    'bg-green-500': 'text-green-500',
+    'bg-emerald-500': 'text-emerald-500',
+    'bg-teal-500': 'text-teal-500',
+    'bg-cyan-500': 'text-cyan-500',
+    'bg-sky-500': 'text-sky-500',
+    'bg-blue-500': 'text-blue-500',
+    'bg-indigo-500': 'text-indigo-500',
+    'bg-violet-500': 'text-violet-500',
+    'bg-purple-500': 'text-purple-500',
+    'bg-fuchsia-500': 'text-fuchsia-500',
+    'bg-pink-500': 'text-pink-500',
+    'bg-rose-500': 'text-rose-500'
+};
+
 function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup, assignedDay?: string, assignedTime?: string }) {
     const borderColorClass = fixedGroup ? (COLOR_MAP[fixedGroup.color] || 'border-slate-200') : '';
 
@@ -353,9 +384,6 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
                     <AlertCircle size={10} />
                 </div>
             )}
-            {fixedGroup && !isConflict && (
-                <div className={cn("absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-sm border-2 border-white", fixedGroup.color)} />
-            )}
 
             <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shadow-inner", getClassColor(member.class))}>
                 <span className="text-white font-bold">{member.class[0]}</span>
@@ -364,9 +392,14 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
             <div className="flex-1 min-w-0">
                 <div className="flex items-baseline justify-between">
                     <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate">{member.name}</span>
-                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
-                        {member.power.toLocaleString()}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                        {fixedGroup && !isConflict && (
+                            <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
+                        )}
+                        <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                            {member.power.toLocaleString()}
+                        </span>
+                    </div>
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-slate-400">{member.class}</span>
@@ -386,10 +419,13 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
             left = rect.left - tooltipWidth - 10;
         }
         left = Math.max(10, left);
-        if (top + 300 > window.innerHeight - 10) {
-            top = window.innerHeight - 300 - 10;
+
+        // Adjust top to prevent bottom overflow
+        const estimatedMaxHeight = 450;
+        if (top + estimatedMaxHeight > window.innerHeight - 20) {
+            top = window.innerHeight - estimatedMaxHeight - 20;
         }
-        top = Math.max(10, top);
+        top = Math.max(20, top);
     }
 
     const style: React.CSSProperties = {
@@ -398,6 +434,8 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
         left: left,
         zIndex: 9999,
         pointerEvents: 'none',
+        maxHeight: 'calc(100vh - 40px)',
+        overflowY: 'auto',
     };
 
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
@@ -532,15 +570,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [searchTerm, setSearchTerm] = useState('');
     const [filterClass, setFilterClass] = useState('ALL');
     const [algoCards, setAlgoCards] = useState<AlgoCard[]>([
-        { id: 'schedule_gating', label: '스케줄 게이팅', desc: '신청자가 선택한 시간에만 배정합니다.', status: 'ESSENTIAL' },
-        { id: 'fixed_group', label: '고정 파티 우선', desc: '설정된 고정 파티 멤버를 1순위로 배정합니다.', status: 'ESSENTIAL' },
-        { id: 'resurrection_anchor', label: '부활 앵커', desc: '파티당 1명의 치유성을 필수 배치합니다.', status: 'ESSENTIAL' },
-        { id: 'scarcity_priority', label: '희소성 우선', desc: '인원이 부족한 역할/시간을 우선 배정합니다.', status: 'PRIORITY' },
-        { id: 'safety_opt', label: '안전 최적화', desc: '검성 탱커 시 호법성을 배치하여 생존력을 보강합니다.', status: 'PRIORITY' },
-        { id: 'combat_logic', label: '전투 로직', desc: '근거리/원거리 클래스 비율을 균형 있게 맞춥니다.', status: 'PRIORITY' },
-        { id: 'power_balance', label: '파워 밸런스', desc: '전투력 고점과 저점을 교차하여 평준화합니다.', status: 'PRIORITY' },
-        { id: 'attendance_volume', label: '참여 볼륨', desc: '남은 자리를 조건 없이 채워 참여 인원을 최대화합니다.', status: 'PRIORITY' },
-        { id: 'main_tank', label: '메인 탱커', desc: '파티당 1명의 수호성/검성을 고정 배치합니다.', status: 'AVAILABLE' },
+        { id: 'schedule_gating', label: '신청 스케줄 준수', desc: '신청자가 선택한 시간에만 배정합니다.', status: 'ESSENTIAL' },
+        { id: 'fixed_group', label: '고정 파티 우선', desc: '설정된 고정 파티 멤버끼리 같은 포스에 배정되도록 합니다.', status: 'ESSENTIAL' },
+        { id: 'resurrection_anchor', label: '치유성 보장', desc: '파티당 1명의 치유성을 고정 배치합니다.', status: 'ESSENTIAL' },
+        { id: 'main_tank', label: '탱커 보장', desc: '파티당 1명의 수호성/검성을 고정 배치합니다.', status: 'AVAILABLE' },
+        { id: 'safety_opt', label: '검성 탱킹 보조', desc: '검성 탱커 시 호법성을 배치하여 생존력을 보강합니다.', status: 'AVAILABLE' },
+        { id: 'combat_logic', label: '근/원 밸런스', desc: '근거리/원거리 클래스 비율을 균형 있게 맞춥니다.', status: 'AVAILABLE' },
+        { id: 'power_balance', label: '전투력 밸런스', desc: '포스 전투력을 균형 있게 맞춥니다.', status: 'AVAILABLE' },
+        { id: 'attendance_volume', label: '포스 강제 생성', desc: '현재 포스 최소 생성 규칙(5명 이상)을 무시하고\n인원이 충분하지 않아도 포스를 강제로 생성합니다.', status: 'AVAILABLE' },
+        { id: 'scarcity_priority', label: '매칭 안전성 강화 (희소성 우선)', desc: '인원이 부족한 역할/시간을 우선적으로 배정합니다.', status: 'AVAILABLE' },
     ]);
 
     // Tooltip State
@@ -741,7 +779,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     // --- Sync Fixed Groups to Members ---
     useEffect(() => {
-        if (!isMounted || allMembers.length === 0 || fixedGroups.length === 0) return;
+        if (!isMounted || allMembers.length === 0) return;
 
         // Use a simple check to prevent infinite loop
         const fixedMap = new Map<string, string>();
@@ -749,18 +787,24 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             (fg.memberIds || []).forEach(mid => fixedMap.set(mid, fg.id));
         });
 
-        let needsUpdate = false;
+        const checkNeedsUpdate = (m: Member): boolean => {
+            const newFixedId = fixedMap.get(m.id) || fixedMap.get(m.name);
+            return m.fixedGroupId !== newFixedId;
+        };
+
         const updateMember = (m: Member): Member => {
-            const newFixedId = fixedMap.get(m.id);
+            const newFixedId = fixedMap.get(m.id) || fixedMap.get(m.name);
             if (m.fixedGroupId !== newFixedId) {
-                needsUpdate = true;
                 return { ...m, fixedGroupId: newFixedId };
             }
             return m;
         };
 
-        if (needsUpdate) {
-            // Use requestAnimationFrame to defer update and prevent render collision
+        const anyUpdateNeeded = allMembers.some(checkNeedsUpdate) ||
+            pool.some(checkNeedsUpdate) ||
+            parties.some(p => p.members.some(checkNeedsUpdate));
+
+        if (anyUpdateNeeded) {
             requestAnimationFrame(() => {
                 setAllMembers(prev => prev.map(updateMember));
                 setPool(prev => prev.map(updateMember));
@@ -770,8 +814,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 })));
             });
         }
-
-    }, [isMounted, fixedGroups, isFixedGroupsLoaded]);
+    }, [isMounted, fixedGroups, isFixedGroupsLoaded, allMembers, pool, parties]);
 
     // --- Helper Functions ---
     const getSlotLabel = (id: string) => {
@@ -867,6 +910,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     const handleAlgoDragOver = (event: DragOverEvent) => {
+        if (!isAdmin) return;
         const { active, over } = event;
         if (!over) return;
 
@@ -915,6 +959,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     const handleAlgoDragEnd = (event: DragEndEvent) => {
+        if (!isAdmin) {
+            alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+            return;
+        }
         const { active, over } = event;
         setActiveAlgoId(null);
 
@@ -1348,49 +1396,27 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             let forceTime = p1.assignedTime;
 
             if (!forceDay || !forceTime) {
-                if (matchType === 'DAY') {
-                    const daysToTry = matchOptions.selectedDays;
-                    if (daysToTry.length > 0) {
-                        // Heuristic: Use first selected day or best among selected
-                        if (daysToTry.includes(selectedDay)) {
-                            forceDay = selectedDay;
-                        } else {
-                            forceDay = daysToTry[0];
-                        }
+                // Unify logic: Search within selected days (for 'DAY' mode) or all days (for 'ALL' mode)
+                // This ensures we ignore the UI's 'selectedSlot' filter and pick the best available time
+                let candidateSlots: { day: string, slot: string, score: number }[] = [];
+                const daysToScan = matchType === 'DAY' ? matchOptions.selectedDays : RAID_DAYS;
+                const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
 
-                        if (selectedSlot) forceTime = selectedSlot;
-                        else {
-                            const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
-                            let bestSlot = null;
-                            let maxCount = -1;
-                            allSlots.forEach(s => {
-                                const count = workingPool.filter(m => m.availability?.[forceDay!]?.includes(s.id)).length;
-                                if (count > maxCount) { maxCount = count; bestSlot = s.id; }
-                            });
-                            forceTime = bestSlot || undefined;
+                daysToScan.forEach(d => {
+                    allSlots.forEach(s => {
+                        const count = workingPool.filter(m => m.availability?.[d]?.includes(s.id)).length;
+                        if (count >= 4) { // Min 4 to form something
+                            candidateSlots.push({ day: d, slot: s.id, score: count });
                         }
-                    }
-                } else {
-                    // Smart Pick (Best Slot for remaining pool)
-                    // ... (Existing implementation kept) ...
-                    let candidateSlots: { day: string, slot: string, score: number }[] = [];
-                    const daysToScan = RAID_DAYS;
-                    const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
-
-                    daysToScan.forEach(d => {
-                        allSlots.forEach(s => {
-                            const count = workingPool.filter(m => m.availability?.[d]?.includes(s.id)).length;
-                            if (count >= 4) { // Min 4 to form something
-                                candidateSlots.push({ day: d, slot: s.id, score: count });
-                            }
-                        });
                     });
+                });
 
-                    candidateSlots.sort((a, b) => b.score - a.score);
-                    if (candidateSlots.length > 0) {
-                        forceDay = candidateSlots[0].day;
-                        forceTime = candidateSlots[0].slot;
-                    }
+                // Sort by score (person count) descending
+                candidateSlots.sort((a, b) => b.score - a.score);
+
+                if (candidateSlots.length > 0) {
+                    forceDay = candidateSlots[0].day;
+                    forceTime = candidateSlots[0].slot;
                 }
             }
 
@@ -1711,7 +1737,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             ) : (
                                 /* ALL View Subtitle */
                                 <div className="py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-700/50">
-                                    <span className="text-xs font-medium">전체 목록에서도 드래그하여 배치가 가능합니다.</span>
+                                    <span className="text-xs font-medium">드레그 하여 수동으로도 포스 생성이 가능합니다.</span>
                                 </div>
                             )}
                         </div>
@@ -1734,10 +1760,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => {
-                                    if (!isAdmin) {
-                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                        return;
-                                    }
                                     setIsAlgoSettingsModalOpen(true);
                                 }}
                                 className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
@@ -1746,10 +1768,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             </button>
                             <button
                                 onClick={() => {
-                                    if (!isAdmin) {
-                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                        return;
-                                    }
                                     setIsAutoMatchModalOpen(true);
                                 }}
                                 className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1"
@@ -1902,8 +1920,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 checked={matchOptions.matchType === 'ALL'}
                                                 onChange={() => setMatchOptions(o => ({ ...o, matchType: 'ALL' }))} />
                                             <div>
-                                                <span className="font-bold text-sm block mb-1">전체 요일 매칭 (Global Match)</span>
-                                                <p className="text-xs text-slate-500">모든 요일의 스케줄을 분석하여 가장 효율적인 시간대에 자동으로 배치합니다.</p>
+                                                <span className="font-bold text-sm block mb-1">전체 요일 매칭</span>
+                                                <p className="text-xs text-slate-500">전체 요일을 기준으로 알고리즘 매칭을 실행합니다.</p>
                                             </div>
                                         </label>
 
@@ -1920,8 +1938,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                         if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
                                                     }} />
                                                 <div className="flex-1">
-                                                    <span className="font-bold text-sm block mb-1">선택 요일 매칭 (Selective Match)</span>
-                                                    <p className="text-xs text-slate-500 mb-3">특정 요일을 선택하여 해당 날짜의 스케줄에 인원을 집중 배정합니다.</p>
+                                                    <span className="font-bold text-sm block mb-1">선택 요일 매칭</span>
+                                                    <p className="text-xs text-slate-500 mb-3">선택한 요일만 대상으로 하여 알고리즘 매칭을 실행합니다.</p>
                                                 </div>
                                             </label>
 
@@ -1980,12 +1998,21 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 <button onClick={() => setIsAutoMatchModalOpen(false)} className="px-5 py-2.5 rounded-xl font-medium text-slate-500 hover:bg-slate-200 transition-colors">
                                     취소
                                 </button>
-                                <button onClick={handleAutoMatch} className="px-8 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        if (!isAdmin) {
+                                            alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                            return;
+                                        }
+                                        handleAutoMatch();
+                                    }}
+                                    className="px-8 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2"
+                                >
                                     <Sparkles size={18} />매칭 실행
                                 </button>
                             </div>
                         </div>
-                    </div>
+                    </div >
                 )
             }
 
@@ -1999,7 +2026,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                     <h2 className="text-xl font-bold flex items-center gap-2">
                                         <Settings className="text-slate-500" /> 매칭 알고리즘 설정
                                     </h2>
-                                    <p className="text-sm text-slate-500 mt-1">우선순위를 드래그하여 조정하세요.</p>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        우선순위를 드래그하여 조정하세요.
+                                        <span className="text-red-500 font-bold ml-1">(관리자 권한 필요)</span>
+                                    </p>
                                 </div>
                                 <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
                                     <X size={20} />
@@ -2025,7 +2055,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                             </div>
                                             <DroppableAlgoColumn id="AVAILABLE" items={algoCards.filter(c => c.status === 'AVAILABLE')}>
                                                 {algoCards.filter(c => c.status === 'AVAILABLE').map((card) => (
-                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                    <SortableAlgoCard key={card.id} card={card} isAdmin={isAdmin} />
                                                 ))}
                                             </DroppableAlgoColumn>
                                         </div>
@@ -2036,12 +2066,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <div className="w-2 h-8 bg-rose-500 rounded-full" />
                                                 <div>
                                                     <h3 className="font-bold text-slate-700 dark:text-slate-200">필수 알고리즘</h3>
-                                                    <p className="text-xs text-slate-400">무조건 반영됩니다. 조건이 많으면 파티 구성이 어려워질 수 있습니다.</p>
+                                                    <p className="text-xs text-slate-400">너무 많은 필수 조건은 포스 생성이 안될수도 있습니다.</p>
                                                 </div>
                                             </div>
                                             <DroppableAlgoColumn id="ESSENTIAL" items={algoCards.filter(c => c.status === 'ESSENTIAL')}>
                                                 {algoCards.filter(c => c.status === 'ESSENTIAL').map((card) => (
-                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                    <SortableAlgoCard key={card.id} card={card} isAdmin={isAdmin} />
                                                 ))}
                                             </DroppableAlgoColumn>
                                         </div>
@@ -2052,12 +2082,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <div className="w-2 h-8 bg-indigo-500 rounded-full" />
                                                 <div>
                                                     <h3 className="font-bold text-slate-700 dark:text-slate-200">우선순위</h3>
-                                                    <p className="text-xs text-slate-400">남은 자리에 적용됩니다. 충돌 시 상위 알고리즘이 우선됩니다.</p>
+                                                    <p className="text-xs text-slate-400">필수는 아니나 최대한 반영. 충돌 시 상위 알고리즘이 우선됩니다.</p>
                                                 </div>
                                             </div>
                                             <DroppableAlgoColumn id="PRIORITY" items={algoCards.filter(c => c.status === 'PRIORITY')}>
                                                 {algoCards.filter(c => c.status === 'PRIORITY').map((card) => (
-                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                    <SortableAlgoCard key={card.id} card={card} isAdmin={isAdmin} />
                                                 ))}
                                             </DroppableAlgoColumn>
                                         </div>
@@ -2068,6 +2098,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                         {activeAlgoId ? (
                                             <SortableAlgoCard
                                                 card={algoCards.find(c => c.id === activeAlgoId)!}
+                                                isAdmin={isAdmin}
                                                 isOverlay
                                             />
                                         ) : null}
@@ -2365,76 +2396,78 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
 
             {/* Time Selection Modal (When force time is missing) */}
-            {timeSelectionModal.isOpen && timeSelectionModal.member && (
-                <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-                        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-                            <div className="flex items-center gap-3">
-                                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white shadow-sm", getClassColor(timeSelectionModal.member.class))}>
-                                    {timeSelectionModal.member.class[0]}
+            {
+                timeSelectionModal.isOpen && timeSelectionModal.member && (
+                    <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                                <div className="flex items-center gap-3">
+                                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white shadow-sm", getClassColor(timeSelectionModal.member.class))}>
+                                        {timeSelectionModal.member.class[0]}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 dark:text-white">{timeSelectionModal.member.name}</h3>
+                                        <p className="text-[11px] text-slate-500">포스 시간을 설정하고 멤버를 배치합니다.</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="font-bold text-slate-900 dark:text-white">{timeSelectionModal.member.name}</h3>
-                                    <p className="text-[11px] text-slate-500">포스 시간을 설정하고 멤버를 배치합니다.</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
-                                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div className="p-6">
-                            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-xl flex items-start gap-3">
-                                <AlertTriangle className="text-amber-500 shrink-0" size={16} />
-                                <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed font-medium">
-                                    현재 포스 시간이 설정되어 있지 않습니다.<br />
-                                    <strong>{timeSelectionModal.member.name}</strong>님이 신청하신 시간대 중 하나를 선택해 주세요.
-                                </p>
+                                <button
+                                    onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
+                                    className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
+                                >
+                                    <X size={18} />
+                                </button>
                             </div>
 
-                            <div className="space-y-4 max-h-[300px] overflow-y-auto px-1 custom-scrollbar">
-                                {RAID_DAYS.map(day => {
-                                    const slots = timeSelectionModal.member?.availability?.[day] || [];
-                                    if (slots.length === 0) return null;
+                            <div className="p-6">
+                                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-xl flex items-start gap-3">
+                                    <AlertTriangle className="text-amber-500 shrink-0" size={16} />
+                                    <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed font-medium">
+                                        현재 포스 시간이 설정되어 있지 않습니다.<br />
+                                        <strong>{timeSelectionModal.member.name}</strong>님이 신청하신 시간대 중 하나를 선택해 주세요.
+                                    </p>
+                                </div>
 
-                                    return (
-                                        <div key={day} className="space-y-2">
-                                            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">{day}요일</h4>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {slots.map(tId => {
-                                                    const s = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === tId);
-                                                    return (
-                                                        <button
-                                                            key={`${day}-${tId}`}
-                                                            onClick={() => handleConfirmTimeSelection(day, tId)}
-                                                            className="flex flex-col items-center justify-center p-3 rounded-xl border-2 border-slate-100 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/20 transition-all group active:scale-95"
-                                                        >
-                                                            <span className="text-sm font-black text-slate-700 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">{s?.label}</span>
-                                                            <span className="text-[10px] text-slate-400">{s?.fullLabel}</span>
-                                                        </button>
-                                                    );
-                                                })}
+                                <div className="space-y-4 max-h-[300px] overflow-y-auto px-1 custom-scrollbar">
+                                    {RAID_DAYS.map(day => {
+                                        const slots = timeSelectionModal.member?.availability?.[day] || [];
+                                        if (slots.length === 0) return null;
+
+                                        return (
+                                            <div key={day} className="space-y-2">
+                                                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">{day}요일</h4>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {slots.map(tId => {
+                                                        const s = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === tId);
+                                                        return (
+                                                            <button
+                                                                key={`${day}-${tId}`}
+                                                                onClick={() => handleConfirmTimeSelection(day, tId)}
+                                                                className="flex flex-col items-center justify-center p-3 rounded-xl border-2 border-slate-100 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/20 transition-all group active:scale-95"
+                                                            >
+                                                                <span className="text-sm font-black text-slate-700 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">{s?.label}</span>
+                                                                <span className="text-[10px] text-slate-400">{s?.fullLabel}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-                            <button
-                                onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
-                                className="w-full py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
-                            >
-                                취소
-                            </button>
+                            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+                                <button
+                                    onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
+                                    className="w-full py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                                >
+                                    취소
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {
                 tooltipInfo && (
@@ -2446,7 +2479,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     />
                 )
             }
-        </DndContext>
+        </DndContext >
     );
 }
 
