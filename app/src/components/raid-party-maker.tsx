@@ -117,6 +117,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [allMembers, setAllMembers] = useState<Member[]>([]);
     const [dbMembers, setDbMembers] = useState<Record<string, any>>({});
     const [pool, setPool] = useState<Member[]>([]);
+    const [applications, setApplications] = useState<Member[]>([]);
     const [parties, setParties] = useState<Party[]>([]);
 
     // UI State
@@ -229,27 +230,56 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         const loadMembers = async () => {
-            // Mock Load for now or real logic
-            // Ideally fetching from DB
+            // 1. Load Roster (members)
             const membersRef = ref(db, 'members');
-            onValue(membersRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    setDbMembers(data);
-                    const list: Member[] = Object.values(data).map((m: any) => ({
-                        id: m.id, name: m.name, class: m.class || '검성',
-                        power: m.power || 0, rank: m.rank || '',
-                        availability: m.availability,
-                        fixedGroupId: m.fixedGroupId
-                    }));
-                    setAllMembers(list);
-                    setPool(list);
+            onValue(membersRef, (memberSnap) => {
+                const memberData = memberSnap.val();
+                const roster: Member[] = memberData ? Object.values(memberData).map((m: any) => ({
+                    id: m.id, name: m.name, class: m.class || '검성',
+                    power: m.power || 0, score: m.score || 0, rank: m.rank || '',
+                    availability: m.availability,
+                    fixedGroupId: m.fixedGroupId
+                })) : [];
+                setAllMembers(roster);
 
-                    // Init Parties
-                    setParties(Array.from({ length: 8 }, (_, i) => ({
-                        id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
-                    })));
-                }
+                // 2. Load Applications (raid_applications)
+                const appsRef = ref(db, 'raid_applications');
+                onValue(appsRef, (appSnap) => {
+                    const appData = appSnap.val();
+                    if (appData) {
+                        const applications = Object.values(appData) as any[];
+
+                        // 3. Map applications to Member objects, enriching with roster data
+                        const applicantList: Member[] = applications.map(app => {
+                            // Find matching member in roster by nickname
+                            const rosterMember = roster.find(m => m.name === app.nickname);
+
+                            return {
+                                id: app.id || app.nickname,
+                                name: app.nickname,
+                                class: app.class || (rosterMember?.class) || '검성',
+                                power: app.power || (rosterMember?.power) || 0,
+                                score: rosterMember?.score || 0,
+                                rank: rosterMember?.rank || '',
+                                availability: app.availability,
+                                fixedGroupId: rosterMember?.fixedGroupId
+                            };
+                        });
+
+                        setApplications(applicantList);
+                        setPool(applicantList);
+                    } else {
+                        setApplications([]);
+                        setPool([]);
+                    }
+                }, { onlyOnce: true });
+
+                // Init Parties (8 per force, 4 forces total in UI but usually we handle 1 force at a time or 8 parties total)
+                // Existing logic had 8 parties.
+                setParties(Array.from({ length: 8 }, (_, i) => ({
+                    id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
+                })));
+
             }, { onlyOnce: true });
         };
         loadMembers();
@@ -971,7 +1001,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const resetAll = () => {
         setParties(parties.map(p => ({ ...p, members: [] })));
-        setPool(allMembers);
+        setPool(applications);
     };
 
     const filteredPool = pool.filter(m => {
