@@ -109,7 +109,364 @@ const getClassColor = (className: string) => {
     }
 };
 
-// --- Main Component Stub ---
+// --- Sub Components ---
+
+function DroppableAlgoColumn({ id, items, children }: { id: string, items: AlgoCard[], children: React.ReactNode }) {
+    const { setNodeRef } = useDroppable({ id });
+
+    let bgClass = "bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50";
+    if (id === 'ESSENTIAL') bgClass = "bg-rose-50/50 dark:bg-rose-900/10 border-rose-100 dark:border-rose-900/30";
+    if (id === 'PRIORITY') bgClass = "bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30";
+
+    return (
+        <div ref={setNodeRef} className={cn("rounded-2xl p-3 flex-1 border h-full", bgClass)}>
+            <SortableContext id={id} items={items} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3 min-h-[100px] h-full">
+                    {children}
+                </div>
+            </SortableContext>
+        </div>
+    );
+}
+
+function SortableAlgoCard({ card, isOverlay = false }: { card: AlgoCard, isOverlay?: boolean }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 50 : 'auto',
+        position: 'relative' as const,
+        opacity: isDragging ? 0.3 : 1, // Dim original when dragging
+    };
+
+    if (isOverlay) {
+        return (
+            <div className={cn(
+                "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-xl ring-2 ring-indigo-500/20 rotate-1 scale-105 z-50 cursor-grabbing",
+                card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
+                card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
+                card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300"
+            )}>
+                <div className="flex justify-between items-start mb-2 pointer-events-none">
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
+                    <GripVertical size={16} className="text-slate-300" />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
+            </div>
+        );
+    }
+
+    return (
+        <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={cn(
+            "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all select-none group touch-none hover:shadow-md cursor-grab active:cursor-grabbing",
+            "border-slate-200 dark:border-slate-700",
+            card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
+            card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
+            card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300 opacity-80 hover:opacity-100"
+        )}>
+            <div className="flex justify-between items-start mb-2 pointer-events-none">
+                <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
+                <GripVertical size={16} className="text-slate-300" />
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
+        </div>
+    );
+}
+
+function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { id: string, members: Member[], fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
+    const { setNodeRef } = useDroppable({ id });
+    return (
+        <div ref={setNodeRef} className={cn("flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar", isReadOnly && "opacity-60 grayscale bg-slate-50/50 dark:bg-slate-900/50")}>
+            {members.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
+                    <Users size={32} strokeWidth={1.5} />
+                    <p className="text-sm">대기 인원이 없습니다</p>
+                </div>
+            ) : (
+                members.map(m => (
+                    <DraggableMember
+                        key={m.id}
+                        member={m}
+                        fixedGroups={fixedGroups}
+                        isReadOnly={isReadOnly}
+                        onShowTooltip={onShowTooltip}
+                        onHideTooltip={onHideTooltip}
+                    />
+                ))
+            )}
+        </div>
+    );
+}
+
+function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip }: { party: Party, fixedGroups?: FixedGroup[], index: number, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
+    const { setNodeRef, isOver } = useDroppable({ id: party.id });
+
+    // Derived Force Info (0-1, 2-3 pair)
+    const forceIndex = Math.floor(index / 2);
+    const isForceLeader = index % 2 === 0;
+
+    return (
+        <div className={cn(
+            "bg-white dark:bg-slate-800 rounded-2xl border transition-all flex flex-col overflow-hidden group shadow-sm hover:shadow-md h-[340px]", // Fixed Height
+            isOver ? "border-indigo-500 ring-4 ring-indigo-500/10 z-10 scale-[1.02]" : "border-slate-200 dark:border-slate-700"
+        )}>
+            <div className="p-3 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{party.name}</span>
+                    <span className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                        party.members.length === 4 ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-500"
+                    )}>
+                        {party.members.length}/4
+                    </span>
+                </div>
+
+                <div className="flex items-center gap-1">
+                    <div className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
+                        party.members.some(m => ['수호성', '검성'].includes(m.class))
+                            ? "bg-blue-100 border-blue-200 text-blue-600 shadow-sm shadow-blue-100" // Active
+                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
+                    )}>
+                        <Shield size={14} strokeWidth={2.5} />
+                    </div>
+
+                    <div className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
+                        party.members.some(m => ['치유성', '호법성'].includes(m.class))
+                            ? "bg-green-100 border-green-200 text-green-600 shadow-sm shadow-green-100" // Active
+                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
+                    )}>
+                        <Plus size={14} strokeWidth={2.5} />
+                    </div>
+                </div>
+            </div>
+
+            <div ref={setNodeRef} className="flex-1 p-2 space-y-1.5 overflow-y-auto custom-scrollbar relative">
+                {party.members.length === 0 && !isOver && (
+                    <div className="absolute inset-0 flex items-center justify-center text-slate-300 pointer-events-none">
+                        <span className="text-xs">드래그하여 추가</span>
+                    </div>
+                )}
+                {party.members.map(m => (
+                    <DraggableMember
+                        key={m.id}
+                        member={m}
+                        fixedGroups={fixedGroups}
+                        onShowTooltip={onShowTooltip}
+                        onHideTooltip={onHideTooltip}
+                    />
+                ))}
+            </div>
+
+            <div className="p-2 bg-slate-50 border-t border-slate-100 flex justify-between text-[10px] text-slate-400">
+                <span>Power: {party.members.reduce((s, m) => s + m.power, 0).toLocaleString()}</span>
+            </div>
+        </div>
+    );
+}
+
+function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip?: (m: Member, r: DOMRect) => void, onHideTooltip?: () => void }) {
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+        id: member.id,
+        disabled: isReadOnly,
+    });
+
+    const fixedGroup = fixedGroups?.find(g => g.id === member.fixedGroupId);
+
+    const style = transform ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        zIndex: 999,
+    } : undefined;
+
+    const handleMouseEnter = (e: React.MouseEvent) => {
+        if (!onShowTooltip) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        onShowTooltip(member, rect);
+    };
+
+    const handleMouseLeave = () => {
+        if (onHideTooltip) onHideTooltip();
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            {...listeners}
+            {...attributes}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className={cn(
+                "touch-none",
+                !isReadOnly && "cursor-grab active:cursor-grabbing",
+                isDragging ? "opacity-0" : "opacity-100",
+                isReadOnly && "opacity-60 cursor-default"
+            )}>
+            <MemberCard member={member} fixedGroup={fixedGroup} />
+        </div>
+    );
+}
+
+const COLOR_MAP: Record<string, string> = {
+    'bg-slate-500': 'border-slate-500',
+    'bg-red-500': 'border-red-500',
+    'bg-orange-500': 'border-orange-500',
+    'bg-amber-500': 'border-amber-500',
+    'bg-yellow-500': 'border-yellow-500',
+    'bg-lime-500': 'border-lime-500',
+    'bg-green-500': 'border-green-500',
+    'bg-emerald-500': 'border-emerald-500',
+    'bg-teal-500': 'border-teal-500',
+    'bg-cyan-500': 'border-cyan-500',
+    'bg-sky-500': 'border-sky-500',
+    'bg-blue-500': 'border-blue-500',
+    'bg-indigo-500': 'border-indigo-500',
+    'bg-violet-500': 'border-violet-500',
+    'bg-purple-500': 'border-purple-500',
+    'bg-fuchsia-500': 'border-fuchsia-500',
+    'bg-pink-500': 'border-pink-500',
+    'bg-rose-500': 'border-rose-500'
+};
+
+function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup }) {
+    const borderColorClass = fixedGroup ? (COLOR_MAP[fixedGroup.color] || 'border-slate-200') : '';
+
+    return (
+        <div className={cn(
+            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border",
+            isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "shadow-sm",
+            fixedGroup && !isOverlay ? cn("border-2", borderColorClass) : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+        )}
+        >
+            {fixedGroup && (
+                <div className={cn("absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-sm border-2 border-white", fixedGroup.color)} />
+            )}
+
+            <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shadow-inner", getClassColor(member.class))}>
+                <span className="text-white font-bold">{member.class[0]}</span>
+            </div>
+
+            <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between">
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate">{member.name}</span>
+                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                        {member.power.toLocaleString()}
+                    </span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-slate-400">{member.class}</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[] }) {
+    const tooltipWidth = 280;
+    let top = rect.top;
+    let left = rect.right + 10;
+
+    if (typeof window !== 'undefined') {
+        if (left + tooltipWidth > window.innerWidth - 20) {
+            left = rect.left - tooltipWidth - 10;
+        }
+        left = Math.max(10, left);
+        if (top + 300 > window.innerHeight - 10) {
+            top = window.innerHeight - 300 - 10;
+        }
+        top = Math.max(10, top);
+    }
+
+    const style: React.CSSProperties = {
+        position: 'fixed',
+        top: top,
+        left: left,
+        zIndex: 9999,
+        pointerEvents: 'none',
+    };
+
+    const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
+    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
+
+    return (
+        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 w-[280px] animate-in slide-in-from-left-2 duration-200">
+            <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
+                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
+                    {member.class[0]}
+                </div>
+                <div>
+                    <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>{member.class}</span>
+                        <span>•</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="mb-4">
+                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                <div className="space-y-2">
+                    {RAID_DAYS.map(day => {
+                        const slots = member.availability?.[day] || [];
+                        if (slots.length === 0) return null;
+
+                        const sortedSlots = [...slots].sort((a, b) => {
+                            const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
+                            const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
+                            return sortA - sortB;
+                        });
+
+                        return (
+                            <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
+                                <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
+                                <div className="flex flex-wrap gap-1 flex-1">
+                                    {sortedSlots.map(t => {
+                                        const slotLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
+                                        return (
+                                            <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
+                                                {slotLabel}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {!RAID_DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                        <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
+                    )}
+                </div>
+            </div>
+
+            {fixedGroup && (
+                <div>
+                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>고정 파티 ({fixedGroup.name})</span>
+                        <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
+                    </h4>
+                    <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+                        {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                            <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
+                                <div className="flex items-center gap-2">
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
+                                    <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
+                                </div>
+                                <span className="text-slate-400 text-[10px]">{gm.class}</span>
+                            </div>
+                        )) : (
+                            <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// --- Main Component ---
 export default function RaidPartyMakerV3({ testMode = false }: { testMode?: boolean }) {
     const { loading, isAdmin } = useAuth();
 
@@ -222,8 +579,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             setAllMembers(mockMembers);
             setPool(mockMembers);
 
-            // Init Parties
-            setParties(Array.from({ length: 8 }, (_, i) => ({
+            // Init Parties (Default 2 Forces = 4 Parties)
+            setParties(Array.from({ length: 4 }, (_, i) => ({
                 id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
             })));
             return;
@@ -274,9 +631,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     }
                 }, { onlyOnce: true });
 
-                // Init Parties (8 per force, 4 forces total in UI but usually we handle 1 force at a time or 8 parties total)
-                // Existing logic had 8 parties.
-                setParties(Array.from({ length: 8 }, (_, i) => ({
+                // Init Parties (Default 2 Forces = 4 Parties)
+                setParties(Array.from({ length: 4 }, (_, i) => ({
                     id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
                 })));
 
@@ -427,10 +783,23 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 }
                 p.members.push(member);
 
-                // Auto-set time if first member
-                if (p.members.length === 1 && !p.assignedTime && selectedSlot) {
-                    p.assignedDay = selectedDay === 'ALL' ? '수' : selectedDay; // Default to Wed if All selected
-                    p.assignedTime = selectedSlot;
+                // Auto-set time if first member in FORCE
+                const partyIdx = newParties.findIndex(pIdx => pIdx.id === targetContainerId);
+                if (partyIdx !== -1 && selectedSlot) {
+                    const forceIdx = Math.floor(partyIdx / 2);
+                    const p1 = newParties[forceIdx * 2];
+                    const p2 = newParties[forceIdx * 2 + 1];
+
+                    // If this is the start of a force configuration or sync is needed
+                    if (!p1.assignedTime || !p2.assignedTime) {
+                        const day = selectedDay === 'ALL' ? '수' : selectedDay;
+                        p1.assignedDay = day;
+                        p1.assignedTime = selectedSlot;
+                        if (p2) {
+                            p2.assignedDay = day;
+                            p2.assignedTime = selectedSlot;
+                        }
+                    }
                 }
             }
         }
@@ -568,53 +937,73 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         // Validation: Time Conflict
         if (targetId !== 'pool') {
             const targetParty = parties.find(p => p.id === targetId);
-            if (targetParty && targetParty.assignedDay && targetParty.assignedTime) {
-                // 1. Fixed Group Smart Check
-                if (member.fixedGroupId) {
-                    const groupMembers = allMembers.filter(m => m.fixedGroupId === member.fixedGroupId && m.id !== member.id);
-                    // Filter only those who applied (exist in allMembers implies they applied/are in pool context if filtered correctly, 
-                    // but allMembers here seems to be the full list including pool and parties. 
-                    // Actually 'allMembers' is prop passed from parent, usually only applicants.
+            if (targetParty) {
+                const partyIdx = parties.findIndex(p => p.id === targetId);
+                const forceIdx = Math.floor(partyIdx / 2);
+                const p1 = parties[forceIdx * 2];
+                const p2 = parties[forceIdx * 2 + 1];
 
-                    if (groupMembers.length > 0) {
-                        // Calculate Intersection of Availability for ALL group members (including self)
-                        const allGroupMembers = [member, ...groupMembers];
-                        const commonSlots = allGroupMembers.reduce((acc, m) => {
-                            const mSlots = m.availability?.[targetParty.assignedDay!] || []; // Type assertion: we know assignedDay exists
-                            if (acc === null) return mSlots;
-                            return acc.filter(s => mSlots.includes(s));
-                        }, null as string[] | null) || [];
+                // Use Force-level time for validation
+                const assignedDay = p1.assignedDay || p2?.assignedDay;
+                const assignedTime = p1.assignedTime || p2?.assignedTime;
 
-                        // If target slot is NOT a common slot, but common slots exist
-                        if (!commonSlots.includes(targetParty.assignedTime) && commonSlots.length > 0) {
-                            const recommendedLabel = `${targetParty.assignedDay} ${getSlotLabel(commonSlots[0])}`; // Show first common slot
-
-                            setConfirmationModal({
-                                isOpen: true,
-                                message: `고정 파티 '${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}' 멤버 전원이\n[${recommendedLabel}]에 참여 가능합니다.\n\n현재 선택한 ${targetParty.assignedDay} ${getSlotLabel(targetParty.assignedTime)}에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
-                                onConfirm: () => {
-                                    executeMove(memberId, targetId);
-                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                },
-                                onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
-                            });
+                if (assignedDay && assignedTime) {
+                    // Skip validation if moving within the same Force (Avoid redundant alerts)
+                    if (sourceId && sourceId !== 'pool') {
+                        const sourceIdx = parties.findIndex(p => p.id === sourceId);
+                        if (Math.floor(sourceIdx / 2) === forceIdx) {
+                            executeMove(memberId, targetId);
                             return;
                         }
                     }
-                }
 
-                // 2. Individual Availability Check (Existing Logic)
-                if ((!member.availability?.[targetParty.assignedDay]?.includes(targetParty.assignedTime))) {
-                    setConfirmationModal({
-                        isOpen: true,
-                        message: `${member.name}님은 해당 시간(${targetParty.assignedDay} ${getSlotLabel(targetParty.assignedTime)})에 신청하지 않았습니다.\n강제 배정하시겠습니까?`,
-                        onConfirm: () => {
-                            executeMove(memberId, targetId);
-                            setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                        },
-                        onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
-                    });
-                    return;
+                    // 1. Fixed Group Smart Check
+                    if (member.fixedGroupId) {
+                        const groupMembers = allMembers.filter(m => m.fixedGroupId === member.fixedGroupId && m.id !== member.id);
+                        // Filter only those who applied (exist in allMembers implies they applied/are in pool context if filtered correctly, 
+                        // but allMembers here seems to be the full list including pool and parties. 
+                        // Actually 'allMembers' is prop passed from parent, usually only applicants.
+
+                        if (groupMembers.length > 0) {
+                            // Calculate Intersection of Availability for ALL group members (including self)
+                            const allGroupMembers = [member, ...groupMembers];
+                            const commonSlots = allGroupMembers.reduce((acc, m) => {
+                                const mSlots = m.availability?.[assignedDay!] || []; // Type assertion: we know assignedDay exists
+                                if (acc === null) return mSlots;
+                                return acc.filter(s => mSlots.includes(s));
+                            }, null as string[] | null) || [];
+
+                            // If target slot is NOT a common slot, but common slots exist
+                            if (!commonSlots.includes(assignedTime) && commonSlots.length > 0) {
+                                const recommendedLabel = `${assignedDay} ${getSlotLabel(commonSlots[0])}`; // Show first common slot
+
+                                setConfirmationModal({
+                                    isOpen: true,
+                                    message: `고정 파티 '${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}' 멤버 전원이\n[${recommendedLabel}]에 참여 가능합니다.\n\n현재 선택한 ${assignedDay} ${getSlotLabel(assignedTime)}에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                    onConfirm: () => {
+                                        executeMove(memberId, targetId);
+                                        setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                    },
+                                    onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                                });
+                                return;
+                            }
+                        }
+                    }
+
+                    // 2. Individual Availability Check (Existing Logic)
+                    if ((!member.availability?.[assignedDay]?.includes(assignedTime))) {
+                        setConfirmationModal({
+                            isOpen: true,
+                            message: `${member.name}님은 해당 시간(${assignedDay} ${getSlotLabel(assignedTime)})에 신청하지 않았습니다.\n강제 배정하시겠습니까?`,
+                            onConfirm: () => {
+                                executeMove(memberId, targetId);
+                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                            },
+                            onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                        });
+                        return;
+                    }
                 }
             }
         }
@@ -1007,8 +1396,35 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     const resetAll = () => {
-        setParties(parties.map(p => ({ ...p, members: [] })));
-        setPool(applications);
+        // Return all party members to pool
+        setPool([...applications]);
+        // Reset parties to default 4 slots (2 forces)
+        setParties(Array.from({ length: 4 }, (_, i) => ({
+            id: `party-${i + 1}`,
+            name: `${i + 1}파티`,
+            members: [],
+            assignedDay: undefined,
+            assignedTime: undefined
+        })));
+        // Reset selected slot
+        setSelectedSlot(undefined);
+    };
+
+    const addForce = () => {
+        if (!isAdmin) {
+            alert("관리자 권한이 필요합니다.");
+            return;
+        }
+
+        const currentForceCount = Math.ceil(parties.length / 2);
+        const nextParty1Num = parties.length + 1;
+        const nextParty2Num = parties.length + 2;
+
+        setParties([
+            ...parties,
+            { id: `party-${nextParty1Num}`, name: `${nextParty1Num}파티`, members: [] },
+            { id: `party-${nextParty2Num}`, name: `${nextParty2Num}파티`, members: [] }
+        ]);
     };
 
     const filteredPool = pool.filter(m => {
@@ -1215,6 +1631,26 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             >
                                 <Sparkles size={14} /> 자동 매칭 시작
                             </button>
+                            <button
+                                onClick={() => {
+                                    if (!isAdmin) {
+                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                        return;
+                                    }
+                                    setConfirmationModal({
+                                        isOpen: true,
+                                        message: "현재 구성된 모든 포스 정보가 초기화됩니다.\n정말로 진행하시겠습니까?",
+                                        onConfirm: () => {
+                                            resetAll();
+                                            setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                        },
+                                        onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                                    });
+                                }}
+                                className="text-xs bg-rose-500 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-rose-500/20 transition-all transform hover:scale-105 flex items-center gap-1"
+                            >
+                                <RotateCcw size={14} /> 포스 구성 초기화
+                            </button>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -1269,15 +1705,19 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 </div>
                             );
                         })}
+
+                        {/* Add Force Button */}
+                        <div className="flex justify-center py-4">
+                            <button
+                                onClick={addForce}
+                                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-slate-50 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl font-bold transition-all transform hover:scale-102 hover:shadow-md"
+                            >
+                                <Plus size={18} /> 포스 추가하기
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {/* 3. Floating Actions */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-800 p-2 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex gap-2 z-20">
-                    <button onClick={resetAll} className="px-6 py-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 font-bold hover:bg-red-50 hover:text-red-500 transition-colors flex items-center gap-2">
-                        <RotateCcw size={18} /> 초기화
-                    </button>
-                </div>
             </div>
 
             <DragOverlay>
@@ -1285,875 +1725,510 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             </DragOverlay>
 
             {/* Auto Match Modal (Simplified - Scope Only) */}
-            {isAutoMatchModalOpen && (
-                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                            <div>
-                                <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <Sparkles className="text-indigo-500" /> 자동 매칭 시작
-                                </h2>
-                                <p className="text-sm text-slate-500 mt-1">매칭 범위를 선택하고 실행하세요.</p>
-                            </div>
-                            <button onClick={() => setIsAutoMatchModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                            {/* Match Type (Primary Range Selection) */}
-                            <section>
-                                <div className="mb-3">
-                                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">매칭 대상 범위</h3>
+            {
+                isAutoMatchModalOpen && (
+                    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-xl font-bold flex items-center gap-2">
+                                        <Sparkles className="text-indigo-500" /> 자동 매칭 시작
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-1">매칭 범위를 선택하고 실행하세요.</p>
                                 </div>
-                                <div className="grid grid-cols-1 gap-4">
-                                    {/* 1. Global Match (All) */}
-                                    <label className={cn(
-                                        "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
-                                        matchOptions.matchType === 'ALL' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
-                                    )}>
-                                        <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
-                                            checked={matchOptions.matchType === 'ALL'}
-                                            onChange={() => setMatchOptions(o => ({ ...o, matchType: 'ALL' }))} />
-                                        <div>
-                                            <span className="font-bold text-sm block mb-1">전체 요일 매칭 (Global Match)</span>
-                                            <p className="text-xs text-slate-500">모든 요일의 스케줄을 분석하여 가장 효율적인 시간대에 자동으로 배치합니다.</p>
-                                        </div>
-                                    </label>
-
-                                    {/* 2. Selective Match (Day) */}
-                                    <div className={cn(
-                                        "flex flex-col p-4 rounded-2xl border-2 transition-all",
-                                        matchOptions.matchType === 'DAY' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
-                                    )}>
-                                        <label className="flex items-start gap-4 cursor-pointer">
-                                            <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
-                                                checked={matchOptions.matchType === 'DAY'}
-                                                onChange={() => {
-                                                    setMatchOptions(o => ({ ...o, matchType: 'DAY' }));
-                                                    if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
-                                                }} />
-                                            <div className="flex-1">
-                                                <span className="font-bold text-sm block mb-1">선택 요일 매칭 (Selective Match)</span>
-                                                <p className="text-xs text-slate-500 mb-3">특정 요일을 선택하여 해당 날짜의 스케줄에 인원을 집중 배정합니다.</p>
-                                            </div>
-                                        </label>
-
-                                        {/* Day Selector (Conditional) */}
-                                        {matchOptions.matchType === 'DAY' && (
-                                            <div className="mt-4 animate-in slide-in-from-top-2 duration-300">
-                                                <div className="grid grid-cols-7 gap-1">
-                                                    {RAID_DAYS.map((d) => {
-                                                        const isSel = matchOptions.selectedDays.includes(d);
-                                                        return (
-                                                            <button
-                                                                key={d}
-                                                                onClick={() => {
-                                                                    setMatchOptions(o => ({
-                                                                        ...o,
-                                                                        selectedDays: isSel
-                                                                            ? o.selectedDays.filter(day => day !== d)
-                                                                            : [...o.selectedDays, d]
-                                                                    }));
-                                                                }}
-                                                                className={cn(
-                                                                    "h-10 rounded-lg text-sm font-bold transition-all border",
-                                                                    isSel
-                                                                        ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                                                                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-indigo-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                                                                )}
-                                                            >
-                                                                {d}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <div className="flex justify-end mt-2">
-                                                    <button
-                                                        onClick={() => {
-                                                            const allSelected = matchOptions.selectedDays.length === RAID_DAYS.length;
-                                                            setMatchOptions(o => ({ ...o, selectedDays: allSelected ? [] : [...RAID_DAYS] }));
-                                                        }}
-                                                        className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex items-center gap-1 transition-colors px-1"
-                                                    >
-                                                        {matchOptions.selectedDays.length === RAID_DAYS.length ? (
-                                                            <><XCircle size={12} /> 전체 해제</>
-                                                        ) : (
-                                                            <><CheckCircle2 size={12} /> 전체 선택</>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </section>
-                        </div>
-
-                        <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end gap-3">
-                            <button onClick={() => setIsAutoMatchModalOpen(false)} className="px-5 py-2.5 rounded-xl font-medium text-slate-500 hover:bg-slate-200 transition-colors">
-                                취소
-                            </button>
-                            <button onClick={handleAutoMatch} className="px-8 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2">
-                                <Sparkles size={18} />매칭 실행
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Algorithm Settings Modal (New - Separated) */}
-            {isAlgoSettingsModalOpen && (
-                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
-                        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                            <div>
-                                <h2 className="text-xl font-bold flex items-center gap-2">
-                                    <Settings className="text-slate-500" /> 매칭 알고리즘 설정
-                                </h2>
-                                <p className="text-sm text-slate-500 mt-1">우선순위를 드래그하여 조정하세요.</p>
-                            </div>
-                            <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-slate-900">
-                            <DndContext
-                                collisionDetection={closestCenter}
-                                onDragStart={handleAlgoDragStart}
-                                onDragOver={handleAlgoDragOver}
-                                onDragEnd={handleAlgoDragEnd}
-                            >
-                                <div className="grid grid-cols-3 gap-6 h-full min-h-[400px]">
-                                    {/* 1. Available Algorithms */}
-                                    <div className="flex flex-col h-full">
-                                        <div className="mb-3 flex items-center gap-2">
-                                            <div className="w-2 h-8 bg-slate-400 rounded-full" />
-                                            <div>
-                                                <h3 className="font-bold text-slate-700 dark:text-slate-200">제공 알고리즘</h3>
-                                                <p className="text-xs text-slate-400">사용 가능한 목록</p>
-                                            </div>
-                                        </div>
-                                        <DroppableAlgoColumn id="AVAILABLE" items={algoCards.filter(c => c.status === 'AVAILABLE')}>
-                                            {algoCards.filter(c => c.status === 'AVAILABLE').map((card) => (
-                                                <SortableAlgoCard key={card.id} card={card} />
-                                            ))}
-                                        </DroppableAlgoColumn>
-                                    </div>
-
-                                    {/* 2. Essential Algorithms */}
-                                    <div className="flex flex-col h-full">
-                                        <div className="mb-3 flex items-center gap-2">
-                                            <div className="w-2 h-8 bg-rose-500 rounded-full" />
-                                            <div>
-                                                <h3 className="font-bold text-slate-700 dark:text-slate-200">필수 알고리즘</h3>
-                                                <p className="text-xs text-slate-400">무조건 반영됩니다. 조건이 많으면 파티 구성이 어려워질 수 있습니다.</p>
-                                            </div>
-                                        </div>
-                                        <DroppableAlgoColumn id="ESSENTIAL" items={algoCards.filter(c => c.status === 'ESSENTIAL')}>
-                                            {algoCards.filter(c => c.status === 'ESSENTIAL').map((card) => (
-                                                <SortableAlgoCard key={card.id} card={card} />
-                                            ))}
-                                        </DroppableAlgoColumn>
-                                    </div>
-
-                                    {/* 3. Priority Algorithms */}
-                                    <div className="flex flex-col h-full">
-                                        <div className="mb-3 flex items-center gap-2">
-                                            <div className="w-2 h-8 bg-indigo-500 rounded-full" />
-                                            <div>
-                                                <h3 className="font-bold text-slate-700 dark:text-slate-200">우선순위</h3>
-                                                <p className="text-xs text-slate-400">남은 자리에 적용됩니다. 충돌 시 상위 알고리즘이 우선됩니다.</p>
-                                            </div>
-                                        </div>
-                                        <DroppableAlgoColumn id="PRIORITY" items={algoCards.filter(c => c.status === 'PRIORITY')}>
-                                            {algoCards.filter(c => c.status === 'PRIORITY').map((card) => (
-                                                <SortableAlgoCard key={card.id} card={card} />
-                                            ))}
-                                        </DroppableAlgoColumn>
-                                    </div>
-                                </div>
-
-                                {/* Drag Overlay */}
-                                <DragOverlay>
-                                    {activeAlgoId ? (
-                                        <SortableAlgoCard
-                                            card={algoCards.find(c => c.id === activeAlgoId)!}
-                                            isOverlay
-                                        />
-                                    ) : null}
-                                </DragOverlay>
-                            </DndContext>
-                        </div>
-
-                        <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end">
-                            <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="px-6 py-2.5 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-colors">
-                                완료
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Confirmation Modal */}
-            {confirmationModal.isOpen && (
-                <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 dark:border-slate-700">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center">
-                                <AlertTriangle size={20} />
-                            </div>
-                            <h3 className="text-lg font-bold">확인 필요</h3>
-                        </div>
-                        <p className="text-slate-600 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">{confirmationModal.message}</p>
-                        <div className="flex gap-2 mt-6">
-                            <button onClick={confirmationModal.onCancel} className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 transition-colors">취소</button>
-                            <button onClick={confirmationModal.onConfirm} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors">확인</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Fixed Group Modal Stub (Can be implemented fully later if needed, mostly CRUD) */}
-            {/* Fixed Group Modal */}
-            {isFixedGroupModalOpen && (
-                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-[80vw] max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
-                        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                            <div>
-                                <h3 className="text-xl font-bold flex items-center gap-2">
-                                    <Settings size={20} className="text-slate-500" /> 고정 파티 관리
-                                </h3>
-                                <p className="text-sm text-slate-500 mt-1">고정으로 운영할 파티원을 관리합니다.</p>
-                            </div>
-                            <button onClick={() => setIsFixedGroupModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="flex flex-1 overflow-hidden">
-                            {/* Left: Group List */}
-                            <div className="w-1/3 border-r border-slate-100 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto space-y-2">
-                                {fixedGroups.map(fg => (
-                                    <button
-                                        key={fg.id}
-                                        onClick={() => setSelectedFixedGroupId(fg.id)}
-                                        className={cn(
-                                            "w-full text-left p-3 rounded-xl border transition-all shadow-sm group",
-                                            selectedFixedGroupId === fg.id
-                                                ? "bg-white dark:bg-slate-800 border-indigo-500 ring-1 ring-indigo-500 z-10"
-                                                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400"
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-between mb-1">
-                                            <div className="flex items-center gap-2 font-bold text-sm">
-                                                <div className={cn("w-3 h-3 rounded-full", fg.color)} />
-                                                {fg.name}
-                                            </div>
-                                            <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">{fg.memberIds.length}명</span>
-                                        </div>
-                                    </button>
-                                ))}
-                                <button
-                                    onClick={() => {
-                                        const newId = `fg-${Date.now()}`;
-                                        const newName = `${fixedGroups.length + 1}팀`;
-                                        const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500'];
-                                        const newColor = colors[fixedGroups.length % colors.length];
-
-                                        const newGroup: FixedGroup = {
-                                            id: newId,
-                                            name: newName,
-                                            color: newColor,
-                                            memberIds: []
-                                        };
-
-                                        setFixedGroups([...fixedGroups, newGroup]);
-                                        setSelectedFixedGroupId(newId);
-                                    }}
-                                    className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center justify-center gap-2 font-bold text-sm"
-                                >
-                                    <Plus size={16} /> 새 팀 추가
+                                <button onClick={() => setIsAutoMatchModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+                                    <X size={20} />
                                 </button>
                             </div>
 
-                            {/* Right: Member Editor */}
-                            <div className="flex-1 p-6 flex flex-col bg-white dark:bg-slate-900">
-                                {selectedFixedGroupId ? (
-                                    (() => {
-                                        const selectedGroup = fixedGroups.find(g => g.id === selectedFixedGroupId);
-                                        if (!selectedGroup) return null;
-
-                                        return (
-                                            <div className="flex flex-col h-full">
-                                                <div className="mb-4 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                                                    <div className="flex items-center gap-2 flex-1">
-                                                        <button
-                                                            onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
-                                                            className={cn("w-4 h-4 rounded-full transition-transform hover:scale-125 focus:outline-none ring-2 ring-offset-2 ring-transparent focus:ring-indigo-500", selectedGroup.color)}
-                                                            title="팀 색상 변경"
-                                                        />
-                                                        <input
-                                                            type="text"
-                                                            value={selectedGroup.name}
-                                                            onChange={(e) => {
-                                                                const newName = e.target.value;
-                                                                setFixedGroups(fixedGroups.map(fg =>
-                                                                    fg.id === selectedFixedGroupId ? { ...fg, name: newName } : fg
-                                                                ));
-                                                            }}
-                                                            className="font-bold text-lg bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-colors w-full"
-                                                            placeholder="팀 이름 입력"
-                                                        />
-                                                    </div>
-                                                    <button
-                                                        onClick={() => {
-                                                            if (confirm(`'${selectedGroup.name}' 팀을 삭제하시겠습니까?`)) {
-                                                                setFixedGroups(fixedGroups.filter(fg => fg.id !== selectedFixedGroupId));
-                                                                setSelectedFixedGroupId(null);
-                                                            }
-                                                        }}
-                                                        className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                                                        title="팀 삭제"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
-                                                </div>
-
-                                                {/* Color Picker (Toggled) */}
-                                                {isColorPickerOpen && (
-                                                    <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar animate-in slide-in-from-top-2 fade-in duration-200">
-                                                        {[
-                                                            'bg-slate-500', 'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
-                                                            'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500',
-                                                            'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500',
-                                                            'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500'
-                                                        ].map(color => (
-                                                            <button
-                                                                key={color}
-                                                                onClick={() => {
-                                                                    setFixedGroups(fixedGroups.map(fg =>
-                                                                        fg.id === selectedFixedGroupId ? { ...fg, color } : fg
-                                                                    ));
-                                                                    // Keep open for easy switching
-                                                                }}
-                                                                className={cn(
-                                                                    "w-8 h-8 rounded-full shrink-0 transition-all border-2",
-                                                                    color,
-                                                                    selectedGroup.color === color ? "border-slate-600 dark:border-white scale-110 shadow-lg ring-2 ring-offset-2 ring-indigo-500" : "border-transparent opacity-70 hover:opacity-100 hover:scale-105"
-                                                                )}
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                {/* Add Member Input (Simple ID/Name Match for prototype) */}
-                                                <div className="mb-4 flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="캐릭터명 검색 (엔터로 추가)"
-                                                        className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') {
-                                                                const val = e.currentTarget.value.trim();
-                                                                if (!val) return;
-
-                                                                // Simple logic: find member by name or ID
-                                                                // In real app, this should be a proper search dropdown
-                                                                const member = allMembers.find(m => m.name === val || m.id === val);
-                                                                if (member) {
-                                                                    // 1. Check if already in THIS group
-                                                                    if (selectedGroup.memberIds.includes(member.id) || selectedGroup.memberIds.includes(member.name)) {
-                                                                        alert("이미 이 팀에 추가된 멤버입니다.");
-                                                                        e.currentTarget.value = '';
-                                                                        return;
-                                                                    }
-
-                                                                    // 2. Check if already in ANOTHER group
-                                                                    const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id) || fg.memberIds.includes(member.name));
-
-                                                                    if (otherGroup) {
-                                                                        // Custom Modal for confirmation
-                                                                        setConfirmationModal({
-                                                                            isOpen: true,
-                                                                            message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n'${selectedGroup.name}'(으)로 이동하시겠습니까?`,
-                                                                            onConfirm: () => {
-                                                                                setFixedGroups(prev => prev.map(fg => {
-                                                                                    if (fg.id === otherGroup.id) {
-                                                                                        return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id && id !== member.name) };
-                                                                                    }
-                                                                                    if (fg.id === selectedFixedGroupId) {
-                                                                                        return { ...fg, memberIds: [...fg.memberIds, member.name] };
-                                                                                    }
-                                                                                    return fg;
-                                                                                }));
-                                                                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                                                            },
-                                                                            onCancel: () => {
-                                                                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                                                            }
-                                                                        });
-                                                                        // Note: Input clearing in async flow is tricky, keeping logic simple or clearing immediately if desired.
-                                                                        // Original logic cleared it inside confirm block. Here we clear it in onConfirm or immediately?
-                                                                        // Should clear immediately to avoid confusion, or handle it via state.
-                                                                        // For now, let's clear it immediately to match recent user behavior expectations if accepted,
-                                                                        // but wait, if cancelled? Better to keep it?
-                                                                        // Let's clear it immediately as it's cleaner for "pending action".
-                                                                        e.currentTarget.value = '';
-                                                                    } else {
-                                                                        // 3. Just Add
-                                                                        setFixedGroups(fixedGroups.map(fg =>
-                                                                            fg.id === selectedFixedGroupId
-                                                                                ? { ...fg, memberIds: [...fg.memberIds, member.name] }
-                                                                                : fg
-                                                                        ));
-                                                                        e.currentTarget.value = '';
-                                                                    }
-                                                                } else {
-                                                                }
-                                                            }
-                                                        }}
-                                                    />
-                                                </div>
-
-                                                {/* Member List */}
-                                                <div className="flex-1 overflow-y-auto space-y-2">
-                                                    {selectedGroup.memberIds.length === 0 ? (
-                                                        <div className="h-40 flex flex-col items-center justify-center text-slate-400 opacity-60">
-                                                            <p className="text-sm">등록된 멤버가 없습니다.</p>
-                                                        </div>
-                                                    ) : (
-                                                        selectedGroup.memberIds.map(mid => {
-                                                            const member = allMembers.find(m => m.id === mid || m.name === mid);
-                                                            return (
-                                                                <div key={mid} className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
-                                                                    <div className="flex items-center gap-2">
-                                                                        {member ? (
-                                                                            <>
-                                                                                <div className={cn("w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white", getClassColor(member.class))}>
-                                                                                    {member.class[0]}
-                                                                                </div>
-                                                                                <span className="font-bold text-sm">{member.name}</span>
-                                                                            </>
-                                                                        ) : (
-                                                                            <span className="text-slate-400 text-sm">Unknown ({mid})</span>
-                                                                        )}
-                                                                    </div>
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            const newGroups = fixedGroups.map(fg =>
-                                                                                fg.id === selectedFixedGroupId
-                                                                                    ? { ...fg, memberIds: fg.memberIds.filter(id => id !== mid) }
-                                                                                    : fg
-                                                                            );
-                                                                            setFixedGroups(newGroups);
-                                                                        }}
-                                                                        className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
-                                                                    >
-                                                                        <Trash2 size={14} />
-                                                                    </button>
-                                                                </div>
-                                                            );
-                                                        })
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })()
-                                ) : (
-                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
-                                        <Users size={32} />
-                                        <p className="text-sm">왼쪽에서 고정 파티를 선택해주세요</p>
+                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                {/* Match Type (Primary Range Selection) */}
+                                <section>
+                                    <div className="mb-3">
+                                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">매칭 대상 범위</h3>
                                     </div>
-                                )}
+                                    <div className="grid grid-cols-1 gap-4">
+                                        {/* 1. Global Match (All) */}
+                                        <label className={cn(
+                                            "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
+                                            matchOptions.matchType === 'ALL' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
+                                        )}>
+                                            <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
+                                                checked={matchOptions.matchType === 'ALL'}
+                                                onChange={() => setMatchOptions(o => ({ ...o, matchType: 'ALL' }))} />
+                                            <div>
+                                                <span className="font-bold text-sm block mb-1">전체 요일 매칭 (Global Match)</span>
+                                                <p className="text-xs text-slate-500">모든 요일의 스케줄을 분석하여 가장 효율적인 시간대에 자동으로 배치합니다.</p>
+                                            </div>
+                                        </label>
+
+                                        {/* 2. Selective Match (Day) */}
+                                        <div className={cn(
+                                            "flex flex-col p-4 rounded-2xl border-2 transition-all",
+                                            matchOptions.matchType === 'DAY' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
+                                        )}>
+                                            <label className="flex items-start gap-4 cursor-pointer">
+                                                <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
+                                                    checked={matchOptions.matchType === 'DAY'}
+                                                    onChange={() => {
+                                                        setMatchOptions(o => ({ ...o, matchType: 'DAY' }));
+                                                        if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
+                                                    }} />
+                                                <div className="flex-1">
+                                                    <span className="font-bold text-sm block mb-1">선택 요일 매칭 (Selective Match)</span>
+                                                    <p className="text-xs text-slate-500 mb-3">특정 요일을 선택하여 해당 날짜의 스케줄에 인원을 집중 배정합니다.</p>
+                                                </div>
+                                            </label>
+
+                                            {/* Day Selector (Conditional) */}
+                                            {matchOptions.matchType === 'DAY' && (
+                                                <div className="mt-4 animate-in slide-in-from-top-2 duration-300">
+                                                    <div className="grid grid-cols-7 gap-1">
+                                                        {RAID_DAYS.map((d) => {
+                                                            const isSel = matchOptions.selectedDays.includes(d);
+                                                            return (
+                                                                <button
+                                                                    key={d}
+                                                                    onClick={() => {
+                                                                        setMatchOptions(o => ({
+                                                                            ...o,
+                                                                            selectedDays: isSel
+                                                                                ? o.selectedDays.filter(day => day !== d)
+                                                                                : [...o.selectedDays, d]
+                                                                        }));
+                                                                    }}
+                                                                    className={cn(
+                                                                        "h-10 rounded-lg text-sm font-bold transition-all border",
+                                                                        isSel
+                                                                            ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                                                            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-indigo-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                                                                    )}
+                                                                >
+                                                                    {d}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <div className="flex justify-end mt-2">
+                                                        <button
+                                                            onClick={() => {
+                                                                const allSelected = matchOptions.selectedDays.length === RAID_DAYS.length;
+                                                                setMatchOptions(o => ({ ...o, selectedDays: allSelected ? [] : [...RAID_DAYS] }));
+                                                            }}
+                                                            className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex items-center gap-1 px-1"
+                                                        >
+                                                            {matchOptions.selectedDays.length === RAID_DAYS.length ? (
+                                                                <><XCircle size={12} /> 전체 해제</>
+                                                            ) : (
+                                                                <><CheckCircle2 size={12} /> 전체 선택</>
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end gap-3">
+                                <button onClick={() => setIsAutoMatchModalOpen(false)} className="px-5 py-2.5 rounded-xl font-medium text-slate-500 hover:bg-slate-200 transition-colors">
+                                    취소
+                                </button>
+                                <button onClick={handleAutoMatch} className="px-8 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2">
+                                    <Sparkles size={18} />매칭 실행
+                                </button>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {tooltipInfo && (
-                <MemberDetailTooltip
-                    member={tooltipInfo.member}
-                    rect={tooltipInfo.rect}
-                    fixedGroups={fixedGroups}
-                    allMembers={allMembers}
-                />
-            )}
+            {/* Algorithm Settings Modal (New - Separated) */}
+            {
+                isAlgoSettingsModalOpen && (
+                    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-xl font-bold flex items-center gap-2">
+                                        <Settings className="text-slate-500" /> 매칭 알고리즘 설정
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-1">우선순위를 드래그하여 조정하세요.</p>
+                                </div>
+                                <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-slate-900">
+                                <DndContext
+                                    collisionDetection={closestCenter}
+                                    onDragStart={handleAlgoDragStart}
+                                    onDragOver={handleAlgoDragOver}
+                                    onDragEnd={handleAlgoDragEnd}
+                                >
+                                    <div className="grid grid-cols-3 gap-6 h-full min-h-[400px]">
+                                        {/* 1. Available Algorithms */}
+                                        <div className="flex flex-col h-full">
+                                            <div className="mb-3 flex items-center gap-2">
+                                                <div className="w-2 h-8 bg-slate-400 rounded-full" />
+                                                <div>
+                                                    <h3 className="font-bold text-slate-700 dark:text-slate-200">제공 알고리즘</h3>
+                                                    <p className="text-xs text-slate-400">사용 가능한 목록</p>
+                                                </div>
+                                            </div>
+                                            <DroppableAlgoColumn id="AVAILABLE" items={algoCards.filter(c => c.status === 'AVAILABLE')}>
+                                                {algoCards.filter(c => c.status === 'AVAILABLE').map((card) => (
+                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                ))}
+                                            </DroppableAlgoColumn>
+                                        </div>
+
+                                        {/* 2. Essential Algorithms */}
+                                        <div className="flex flex-col h-full">
+                                            <div className="mb-3 flex items-center gap-2">
+                                                <div className="w-2 h-8 bg-rose-500 rounded-full" />
+                                                <div>
+                                                    <h3 className="font-bold text-slate-700 dark:text-slate-200">필수 알고리즘</h3>
+                                                    <p className="text-xs text-slate-400">무조건 반영됩니다. 조건이 많으면 파티 구성이 어려워질 수 있습니다.</p>
+                                                </div>
+                                            </div>
+                                            <DroppableAlgoColumn id="ESSENTIAL" items={algoCards.filter(c => c.status === 'ESSENTIAL')}>
+                                                {algoCards.filter(c => c.status === 'ESSENTIAL').map((card) => (
+                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                ))}
+                                            </DroppableAlgoColumn>
+                                        </div>
+
+                                        {/* 3. Priority Algorithms */}
+                                        <div className="flex flex-col h-full">
+                                            <div className="mb-3 flex items-center gap-2">
+                                                <div className="w-2 h-8 bg-indigo-500 rounded-full" />
+                                                <div>
+                                                    <h3 className="font-bold text-slate-700 dark:text-slate-200">우선순위</h3>
+                                                    <p className="text-xs text-slate-400">남은 자리에 적용됩니다. 충돌 시 상위 알고리즘이 우선됩니다.</p>
+                                                </div>
+                                            </div>
+                                            <DroppableAlgoColumn id="PRIORITY" items={algoCards.filter(c => c.status === 'PRIORITY')}>
+                                                {algoCards.filter(c => c.status === 'PRIORITY').map((card) => (
+                                                    <SortableAlgoCard key={card.id} card={card} />
+                                                ))}
+                                            </DroppableAlgoColumn>
+                                        </div>
+                                    </div>
+
+                                    {/* Drag Overlay */}
+                                    <DragOverlay>
+                                        {activeAlgoId ? (
+                                            <SortableAlgoCard
+                                                card={algoCards.find(c => c.id === activeAlgoId)!}
+                                                isOverlay
+                                            />
+                                        ) : null}
+                                    </DragOverlay>
+                                </DndContext>
+                            </div>
+
+                            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end">
+                                <button onClick={() => setIsAlgoSettingsModalOpen(false)} className="px-6 py-2.5 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-colors">
+                                    완료
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* Confirmation Modal */}
+            {
+                confirmationModal.isOpen && (
+                    <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100 dark:border-slate-700">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center">
+                                    <AlertTriangle size={20} />
+                                </div>
+                                <h3 className="text-lg font-bold">확인 필요</h3>
+                            </div>
+                            <p className="text-slate-600 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">{confirmationModal.message}</p>
+                            <div className="flex gap-2 mt-6">
+                                <button onClick={confirmationModal.onCancel} className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 transition-colors">취소</button>
+                                <button onClick={confirmationModal.onConfirm} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors">확인</button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* Fixed Group Modal Stub (Can be implemented fully later if needed, mostly CRUD) */}
+            {/* Fixed Group Modal */}
+            {
+                isFixedGroupModalOpen && (
+                    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 w-[80vw] max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[80vh]">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                                <div>
+                                    <h3 className="text-xl font-bold flex items-center gap-2">
+                                        <Settings size={20} className="text-slate-500" /> 고정 파티 관리
+                                    </h3>
+                                    <p className="text-sm text-slate-500 mt-1">고정으로 운영할 파티원을 관리합니다.</p>
+                                </div>
+                                <button onClick={() => setIsFixedGroupModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            <div className="flex flex-1 overflow-hidden">
+                                {/* Left: Group List */}
+                                <div className="w-1/3 border-r border-slate-100 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto space-y-2">
+                                    {fixedGroups.map(fg => (
+                                        <button
+                                            key={fg.id}
+                                            onClick={() => setSelectedFixedGroupId(fg.id)}
+                                            className={cn(
+                                                "w-full text-left p-3 rounded-xl border transition-all shadow-sm group",
+                                                selectedFixedGroupId === fg.id
+                                                    ? "bg-white dark:bg-slate-800 border-indigo-500 ring-1 ring-indigo-500 z-10"
+                                                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400"
+                                            )}
+                                        >
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2 font-bold text-sm">
+                                                    <div className={cn("w-3 h-3 rounded-full", fg.color)} />
+                                                    {fg.name}
+                                                </div>
+                                                <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">{fg.memberIds.length}명</span>
+                                            </div>
+                                        </button>
+                                    ))}
+                                    <button
+                                        onClick={() => {
+                                            const newId = `fg-${Date.now()}`;
+                                            const newName = `${fixedGroups.length + 1}팀`;
+                                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500'];
+                                            const newColor = colors[fixedGroups.length % colors.length];
+
+                                            const newGroup: FixedGroup = {
+                                                id: newId,
+                                                name: newName,
+                                                color: newColor,
+                                                memberIds: []
+                                            };
+
+                                            setFixedGroups([...fixedGroups, newGroup]);
+                                            setSelectedFixedGroupId(newId);
+                                        }}
+                                        className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center justify-center gap-2 font-bold text-sm"
+                                    >
+                                        <Plus size={16} /> 새 팀 추가
+                                    </button>
+                                </div>
+
+                                {/* Right: Member Editor */}
+                                <div className="flex-1 p-6 flex flex-col bg-white dark:bg-slate-900">
+                                    {selectedFixedGroupId ? (
+                                        (() => {
+                                            const selectedGroup = fixedGroups.find(g => g.id === selectedFixedGroupId);
+                                            if (!selectedGroup) return null;
+
+                                            return (
+                                                <div className="flex flex-col h-full">
+                                                    <div className="mb-4 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-2 flex-1">
+                                                            <button
+                                                                onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+                                                                className={cn("w-4 h-4 rounded-full transition-transform hover:scale-125 focus:outline-none ring-2 ring-offset-2 ring-transparent focus:ring-indigo-500", selectedGroup?.color)}
+                                                                title="팀 색상 변경"
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                value={selectedGroup?.name}
+                                                                onChange={(e) => {
+                                                                    const newName = e.target.value;
+                                                                    setFixedGroups(fixedGroups.map(fg =>
+                                                                        fg.id === selectedFixedGroupId ? { ...fg, name: newName } : fg
+                                                                    ));
+                                                                }}
+                                                                className="font-bold text-lg bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-colors w-full"
+                                                                placeholder="팀 이름 입력"
+                                                            />
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm(`'${selectedGroup?.name}' 팀을 삭제하시겠습니까?`)) {
+                                                                    setFixedGroups(fixedGroups.filter(fg => fg.id !== selectedFixedGroupId));
+                                                                    setSelectedFixedGroupId(null);
+                                                                }
+                                                            }}
+                                                            className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                                                            title="팀 삭제"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Color Picker (Toggled) */}
+                                                    {isColorPickerOpen && (
+                                                        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar animate-in slide-in-from-top-2 fade-in duration-200">
+                                                            {[
+                                                                'bg-slate-500', 'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
+                                                                'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500',
+                                                                'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500',
+                                                                'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500'
+                                                            ].map(color => (
+                                                                <button
+                                                                    key={color}
+                                                                    onClick={() => {
+                                                                        setFixedGroups(fixedGroups.map(fg =>
+                                                                            fg.id === selectedFixedGroupId ? { ...fg, color } : fg
+                                                                        ));
+                                                                        // Keep open for easy switching
+                                                                    }}
+                                                                    className={cn(
+                                                                        "w-8 h-8 rounded-full shrink-0 transition-all border-2",
+                                                                        color,
+                                                                        selectedGroup?.color === color ? "border-slate-600 dark:border-white scale-110 shadow-lg ring-2 ring-offset-2 ring-indigo-500" : "border-transparent opacity-70 hover:opacity-100 hover:scale-105"
+                                                                    )}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Add Member Input (Simple ID/Name Match for prototype) */}
+                                                    <div className="mb-4 flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            placeholder="캐릭터명 검색 (엔터로 추가)"
+                                                            className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    const val = e.currentTarget.value.trim();
+                                                                    if (!val) return;
+
+                                                                    // Simple logic: find member by name or ID
+                                                                    // In real app, this should be a proper search dropdown
+                                                                    const member = allMembers.find(m => m.name === val || m.id === val);
+                                                                    if (member) {
+                                                                        // 1. Check if already in THIS group
+                                                                        if (selectedGroup?.memberIds.includes(member.id) || selectedGroup?.memberIds.includes(member.name)) {
+                                                                            alert("이미 이 팀에 추가된 멤버입니다.");
+                                                                            e.currentTarget.value = '';
+                                                                            return;
+                                                                        }
+
+                                                                        // 2. Check if already in ANOTHER group
+                                                                        const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id) || fg.memberIds.includes(member.name));
+
+                                                                        if (otherGroup) {
+                                                                            // Custom Modal for confirmation
+                                                                            setConfirmationModal({
+                                                                                isOpen: true,
+                                                                                message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n'${selectedGroup?.name}'(으)로 이동하시겠습니까?`,
+                                                                                onConfirm: () => {
+                                                                                    setFixedGroups(prev => prev.map(fg => {
+                                                                                        if (fg.id === otherGroup.id) {
+                                                                                            return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id && id !== member.name) };
+                                                                                        }
+                                                                                        if (fg.id === selectedFixedGroupId) {
+                                                                                            return { ...fg, memberIds: [...fg.memberIds, member.name] };
+                                                                                        }
+                                                                                        return fg;
+                                                                                    }));
+                                                                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                                                                },
+                                                                                onCancel: () => {
+                                                                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                                                                }
+                                                                            });
+                                                                            // Note: Input clearing in async flow is tricky, keeping logic simple or clearing immediately if desired.
+                                                                            // Original logic cleared it inside confirm block. Here we clear it in onConfirm or immediately?
+                                                                            // Should clear immediately to avoid confusion, or handle it via state.
+                                                                            // For now, let's clear it immediately as it's cleaner for "pending action".
+                                                                            e.currentTarget.value = '';
+                                                                        } else {
+                                                                            // 3. Just Add
+                                                                            setFixedGroups(fixedGroups.map(fg =>
+                                                                                fg.id === selectedFixedGroupId
+                                                                                    ? { ...fg, memberIds: [...fg.memberIds, member.name] }
+                                                                                    : fg
+                                                                            ));
+                                                                            e.currentTarget.value = '';
+                                                                        }
+                                                                    } else {
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+
+                                                    {/* Member List */}
+                                                    <div className="flex-1 overflow-y-auto space-y-2">
+                                                        {selectedGroup?.memberIds.length === 0 ? (
+                                                            <div className="h-40 flex flex-col items-center justify-center text-slate-400 opacity-60">
+                                                                <p className="text-sm">등록된 멤버가 없습니다.</p>
+                                                            </div>
+                                                        ) : (
+                                                            selectedGroup?.memberIds.map(mid => {
+                                                                const member = allMembers.find(m => m.id === mid || m.name === mid);
+                                                                return (
+                                                                    <div key={mid} className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                                                                        <div className="flex items-center gap-2">
+                                                                            {member ? (
+                                                                                <>
+                                                                                    <div className={cn("w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white", getClassColor(member.class))}>
+                                                                                        {member.class[0]}
+                                                                                    </div>
+                                                                                    <span className="font-bold text-sm">{member.name}</span>
+                                                                                </>
+                                                                            ) : (
+                                                                                <span className="text-slate-400 text-sm">Unknown ({mid})</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const newGroups = fixedGroups.map(fg =>
+                                                                                    fg.id === selectedFixedGroupId
+                                                                                        ? { ...fg, memberIds: fg.memberIds.filter(id => id !== mid) }
+                                                                                        : fg
+                                                                                );
+                                                                                setFixedGroups(newGroups);
+                                                                            }}
+                                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    </div>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()
+                                    ) : (
+                                        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
+                                            <Users size={32} />
+                                            <p className="text-sm">왼쪽에서 고정 파티를 선택해주세요</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+            {
+                tooltipInfo && (
+                    <MemberDetailTooltip
+                        member={tooltipInfo!.member}
+                        rect={tooltipInfo!.rect}
+                        fixedGroups={fixedGroups}
+                        allMembers={allMembers}
+                    />
+                )
+            }
         </DndContext>
     );
 }
 
-// --- Sub Components ---
-
-function DroppableAlgoColumn({ id, items, children }: { id: string, items: AlgoCard[], children: React.ReactNode }) {
-    const { setNodeRef } = useDroppable({ id });
-
-    let bgClass = "bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50";
-    if (id === 'ESSENTIAL') bgClass = "bg-rose-50/50 dark:bg-rose-900/10 border-rose-100 dark:border-rose-900/30";
-    if (id === 'PRIORITY') bgClass = "bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30";
-
-    return (
-        <div ref={setNodeRef} className={cn("rounded-2xl p-3 flex-1 border h-full", bgClass)}>
-            <SortableContext id={id} items={items} strategy={verticalListSortingStrategy}>
-                <div className="space-y-3 min-h-[100px] h-full">
-                    {children}
-                </div>
-            </SortableContext>
-        </div>
-    );
-}
-
-function SortableAlgoCard({ card, isOverlay = false }: { card: AlgoCard, isOverlay?: boolean }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-        zIndex: isDragging ? 50 : 'auto',
-        position: 'relative' as const,
-        opacity: isDragging ? 0.3 : 1, // Dim original when dragging
-    };
-
-    if (isOverlay) {
-        return (
-            <div className={cn(
-                "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-xl ring-2 ring-indigo-500/20 rotate-1 scale-105 z-50 cursor-grabbing",
-                card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
-                card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
-                card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300"
-            )}>
-                <div className="flex justify-between items-start mb-2 pointer-events-none">
-                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
-                    <GripVertical size={16} className="text-slate-300" />
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
-            </div>
-        );
-    }
-
-    return (
-        <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={cn(
-            "p-4 bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all select-none group touch-none hover:shadow-md cursor-grab active:cursor-grabbing",
-            "border-slate-200 dark:border-slate-700",
-            card.status === 'ESSENTIAL' && "border-l-4 border-l-rose-500",
-            card.status === 'PRIORITY' && "border-l-4 border-l-indigo-500",
-            card.status === 'AVAILABLE' && "border-l-4 border-l-slate-300 opacity-80 hover:opacity-100"
-        )}>
-            <div className="flex justify-between items-start mb-2 pointer-events-none">
-                <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">{card.label}</span>
-                <GripVertical size={16} className="text-slate-300" />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal pointer-events-none">{card.desc}</p>
-        </div>
-    );
-}
-
-function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { id: string, members: Member[], fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
-    const { setNodeRef } = useDroppable({ id });
-    return (
-        <div ref={setNodeRef} className={cn("flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar", isReadOnly && "opacity-60 grayscale bg-slate-50/50 dark:bg-slate-900/50")}>
-            {members.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-50">
-                    <Users size={32} strokeWidth={1.5} />
-                    <p className="text-sm">대기 인원이 없습니다</p>
-                </div>
-            ) : (
-                members.map(m => (
-                    <DraggableMember
-                        key={m.id}
-                        member={m}
-                        fixedGroups={fixedGroups}
-                        isReadOnly={isReadOnly}
-                        onShowTooltip={onShowTooltip}
-                        onHideTooltip={onHideTooltip}
-                    />
-                ))
-            )}
-        </div>
-    );
-}
-
-// Renamed to force HMR update
-function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip }: { party: Party, fixedGroups?: FixedGroup[], index: number, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
-    const { setNodeRef, isOver } = useDroppable({ id: party.id });
-
-    // Derived Force Info (0-1, 2-3 pair)
-    const forceIndex = Math.floor(index / 2);
-    const isForceLeader = index % 2 === 0;
-
-    return (
-        <div className={cn(
-            "bg-white dark:bg-slate-800 rounded-2xl border transition-all flex flex-col overflow-hidden group shadow-sm hover:shadow-md h-[340px]", // Fixed Height
-            isOver ? "border-indigo-500 ring-4 ring-indigo-500/10 z-10 scale-[1.02]" : "border-slate-200 dark:border-slate-700"
-        )}>
-            {/* Thread/Connector Visuals if needed */}
-            <div className="p-3 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-                <div className="flex items-center gap-2">
-                    {/* Index Removed */}
-                    <span className="font-bold text-slate-700 dark:text-slate-200">{party.name}</span>
-                    <span className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                        party.members.length === 4 ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-500"
-                    )}>
-                        {party.members.length}/4
-                    </span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                    {/* Tanker Indicator */}
-                    <div className={cn(
-                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
-                        party.members.some(m => ['수호성', '검성'].includes(m.class))
-                            ? "bg-blue-100 border-blue-200 text-blue-600 shadow-sm shadow-blue-100" // Active
-                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
-                    )}>
-                        <Shield size={14} strokeWidth={2.5} />
-                    </div>
-
-                    {/* Healer Indicator */}
-                    <div className={cn(
-                        "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
-                        party.members.some(m => ['치유성', '호법성'].includes(m.class))
-                            ? "bg-green-100 border-green-200 text-green-600 shadow-sm shadow-green-100" // Active
-                            : "bg-slate-50 border-slate-100 text-slate-300" // Inactive
-                    )}>
-                        <Plus size={14} strokeWidth={2.5} />
-                    </div>
-                </div>
-            </div>
-
-            <div ref={setNodeRef} className="flex-1 p-2 space-y-1.5 overflow-y-auto custom-scrollbar relative">
-                {party.members.length === 0 && !isOver && (
-                    <div className="absolute inset-0 flex items-center justify-center text-slate-300 pointer-events-none">
-                        <span className="text-xs">드래그하여 추가</span>
-                    </div>
-                )}
-                {party.members.map(m => (
-                    <DraggableMember
-                        key={m.id}
-                        member={m}
-                        fixedGroups={fixedGroups}
-                        onShowTooltip={onShowTooltip}
-                        onHideTooltip={onHideTooltip}
-                    />
-                ))}
-            </div>
-
-            {/* Simple Stats Footer */}
-            <div className="p-2 bg-slate-50 border-t border-slate-100 flex justify-between text-[10px] text-slate-400">
-                <span>Power: {party.members.reduce((s, m) => s + m.power, 0).toLocaleString()}</span>
-            </div>
-        </div >
-    );
-}
-
-function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip?: (m: Member, r: DOMRect) => void, onHideTooltip?: () => void }) {
-    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-        id: member.id,
-        disabled: isReadOnly, // Disable drag if read-only
-    });
-
-    // Check Fixed Group
-    const fixedGroup = fixedGroups?.find(g => g.id === member.fixedGroupId);
-
-    const style = transform ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        zIndex: 999, // High z-index while dragging
-    } : undefined;
-
-    const handleMouseEnter = (e: React.MouseEvent) => {
-        if (!onShowTooltip) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        onShowTooltip(member, rect);
-    };
-
-    const handleMouseLeave = () => {
-        if (onHideTooltip) onHideTooltip();
-    };
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            {...listeners}
-            {...attributes}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-            className={cn(
-                "touch-none",
-                !isReadOnly && "cursor-grab active:cursor-grabbing", // Only show grab cursor if not read-only
-                isDragging ? "opacity-0" : "opacity-100", // Hide original while dragging
-                isReadOnly && "opacity-60 cursor-default" // Hint read-only status without blocking clicks
-            )}>
-            <MemberCard member={member} fixedGroup={fixedGroup} />
-        </div>
-    );
-}
-
-// Safe mapping for Tailwind classes to ensure they are not purged
-const COLOR_MAP: Record<string, string> = {
-    'bg-slate-500': 'border-slate-500',
-    'bg-red-500': 'border-red-500',
-    'bg-orange-500': 'border-orange-500',
-    'bg-amber-500': 'border-amber-500',
-    'bg-yellow-500': 'border-yellow-500',
-    'bg-lime-500': 'border-lime-500',
-    'bg-green-500': 'border-green-500',
-    'bg-emerald-500': 'border-emerald-500',
-    'bg-teal-500': 'border-teal-500',
-    'bg-cyan-500': 'border-cyan-500',
-    'bg-sky-500': 'border-sky-500',
-    'bg-blue-500': 'border-blue-500',
-    'bg-indigo-500': 'border-indigo-500',
-    'bg-violet-500': 'border-violet-500',
-    'bg-purple-500': 'border-purple-500',
-    'bg-fuchsia-500': 'border-fuchsia-500',
-    'bg-pink-500': 'border-pink-500',
-    'bg-rose-500': 'border-rose-500'
-};
-
-function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup }) {
-    // Explicit lookup to fix Tailwind JIT purging
-    const borderColorClass = fixedGroup ? (COLOR_MAP[fixedGroup.color] || 'border-slate-200') : '';
-
-    return (
-        <div className={cn(
-            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border",
-            isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "shadow-sm",
-            fixedGroup && !isOverlay ? cn("border-2", borderColorClass) : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
-        )}
-        >
-            {/* Fixed Group Indicator */}
-            {fixedGroup && (
-                <div className={cn("absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-sm border-2 border-white", fixedGroup.color)} />
-            )}
-
-            <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shadow-inner", getClassColor(member.class))}>
-                <span className="text-white font-bold">{member.class[0]}</span>
-            </div>
-
-            <div className="flex-1 min-w-0">
-                <div className="flex items-baseline justify-between">
-                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate">{member.name}</span>
-                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
-                        {member.power.toLocaleString()}
-                    </span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-400">{member.class}</span>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[] }) {
-    const tooltipWidth = 280;
-    let top = rect.top;
-    let left = rect.right + 10;
-
-    if (typeof window !== 'undefined') {
-        if (left + tooltipWidth > window.innerWidth - 20) {
-            left = rect.left - tooltipWidth - 10;
-        }
-        left = Math.max(10, left);
-        if (top + 300 > window.innerHeight - 10) {
-            top = window.innerHeight - 300 - 10;
-        }
-        top = Math.max(10, top);
-    }
-
-    const style: React.CSSProperties = {
-        position: 'fixed',
-        top: top,
-        left: left,
-        zIndex: 9999,
-        pointerEvents: 'none',
-    };
-
-    const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
-    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
-
-    return (
-        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 w-[280px] animate-in slide-in-from-left-2 duration-200">
-            {/* Header */}
-            <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
-                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
-                    {member.class[0]}
-                </div>
-                <div>
-                    <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span>{member.class}</span>
-                        <span>•</span>
-                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Availability */}
-            <div className="mb-4">
-                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
-                <div className="space-y-2">
-                    {['수', '목', '금', '토', '일', '월', '화'].map(day => {
-                        const slots = member.availability?.[day] || [];
-                        if (slots.length === 0) return null;
-
-                        // Sort slots numerically (assuming IDs like "13", "14")
-                        const sortedSlots = [...slots].sort((a, b) => parseInt(a) - parseInt(b));
-
-                        return (
-                            <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
-                                <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
-                                <div className="flex flex-wrap gap-1 flex-1">
-                                    {sortedSlots.map(t => {
-                                        const slotLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
-                                        // Remove "오후 " for brevity if desired, or keep it. User asked "13시" style. 
-                                        // The labels are "오후 6:30". Let's convert or use just the time part if possible, or mapping.
-                                        // Constants: { id: 'wd1', label: '오후 6:30' }
-                                        // If user wants "13시", I might need a custom mapping or just show the label.
-                                        // "wd1시" was because `t` was "wd1".
-                                        // Let's use the label but strips "오후 " to save space or just use the label.
-                                        return (
-                                            <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
-                                                {slotLabel}
-                                            </span>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        );
-                    })}
-                    {!['수', '목', '금', '토', '일', '월', '화'].some(d => (member.availability?.[d]?.length || 0) > 0) && (
-                        <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
-                    )}
-                </div>
-            </div>
-
-            {/* Fixed Group Info */}
-            {fixedGroup && (
-                <div>
-                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                        <span>고정 파티 ({fixedGroup.name})</span>
-                        <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
-                    </h4>
-                    <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-                        {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
-                            <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
-                                <div className="flex items-center gap-2">
-                                    <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
-                                    <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
-                                </div>
-                                <span className="text-slate-400 text-[10px]">{gm.class}</span>
-                            </div>
-                        )) : (
-                            <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
-                        )}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}

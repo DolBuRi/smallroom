@@ -131,7 +131,7 @@ export default function Home() {
             <NavButton active={activeTab === 'raid_v2'} onClick={() => setActiveTab('raid_v2')} icon={<Grid3X3 size={20} />}>
               성역 신청 현황
             </NavButton>
-            <NavButton active={activeTab === 'party_maker'} onClick={() => setActiveTab('party_maker')} icon={<Trophy size={20} />}>
+            <NavButton active={activeTab === 'party_maker'} onClick={() => setActiveTab('party_maker')} icon={<Sword size={20} />}>
               성역 파티 매칭
             </NavButton>
 
