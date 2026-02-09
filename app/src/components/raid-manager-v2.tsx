@@ -210,6 +210,8 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     // Detailed View State
     const [selectedDay, setSelectedDay] = useState<string>('전체');
     const [overviewViewMode, setOverviewViewMode] = useState<'slots' | 'list'>('slots');
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [resetConfirmText, setResetConfirmText] = useState('');
 
     // Initial Data Sync
     useEffect(() => {
@@ -281,11 +283,18 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
 
     const handleResetAll = async () => {
         if (!isAdmin) return alert("관리자 권한이 필요합니다.");
-        if (!confirm("모든 데이터를 초기화하시겠습니까?")) return;
-        await remove(ref(db, 'raid_applications'));
-        await remove(ref(db, 'raid_matched_forces'));
-        await remove(ref(db, 'raid_unassigned_members'));
-        alert("초기화 완료");
+
+        setIsResetModalOpen(false); // Close modal
+
+        try {
+            await remove(ref(db, 'raid_applications'));
+            await remove(ref(db, 'raid_matched_forces'));
+            await remove(ref(db, 'raid_unassigned_members'));
+            alert("신청 정보가 성공적으로 초기화되었습니다.");
+        } catch (e) {
+            console.error("Reset Error:", e);
+            alert("초기화 중 오류가 발생했습니다.");
+        }
     };
 
     // Derived Data for Detailed View
@@ -323,7 +332,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                 [DB] 더미 생성
                             </button>
                             <button
-                                onClick={handleResetAll}
+                                onClick={() => setIsResetModalOpen(true)}
                                 className="px-4 py-2.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-black hover:bg-rose-100 dark:hover:bg-rose-800/30 transition-colors flex items-center gap-2 border border-rose-100 dark:border-rose-900/30 shadow-sm"
                             >
                                 <X size={14} className="stroke-[3px]" />
@@ -333,6 +342,47 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     )}
                 </div>
             </div>
+
+            {/* RESET WARNING MODAL */}
+            {isResetModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+                        <div className="p-10 flex flex-col items-center text-center">
+                            {/* Warning Icon */}
+                            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/30 rounded-full flex items-center justify-center mb-6 ring-8 ring-rose-50/50 dark:ring-rose-900/10">
+                                <AlertCircle size={40} className="text-rose-500 animate-pulse" />
+                            </div>
+
+                            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-3">신청 정보를 초기화할까요?</h3>
+
+                            <div className="space-y-2 mb-8">
+                                <p className="text-slate-500 dark:text-slate-400 text-sm font-medium leading-relaxed">
+                                    현재까지 접수된 <span className="text-rose-500 font-bold">모든 신청 내역과 매칭 결과</span>가<br />
+                                    영구적으로 삭제되며 복구할 수 없습니다.
+                                </p>
+                                <p className="text-[11px] text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg mt-4">
+                                    새로운 주차의 레이드 매칭을 준비할 때만 사용해 주세요.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 w-full">
+                                <button
+                                    onClick={() => setIsResetModalOpen(false)}
+                                    className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-bold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    onClick={handleResetAll}
+                                    className="px-6 py-4 bg-rose-500 text-white font-black rounded-2xl shadow-lg shadow-rose-200 dark:shadow-none hover:bg-rose-600 transition-all active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                    지금 초기화
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
 
             {/* HEATMAP GRID (Calendar Style) */}
