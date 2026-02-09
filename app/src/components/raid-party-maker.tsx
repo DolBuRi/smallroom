@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, get, child } from 'firebase/database';
@@ -199,7 +199,7 @@ function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, on
     );
 }
 
-function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip }: { party: Party, fixedGroups?: FixedGroup[], index: number, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
+function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip, isAdmin, assignedDay, assignedTime }: { party: Party, fixedGroups?: FixedGroup[], index: number, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void, isAdmin?: boolean, assignedDay?: string, assignedTime?: string }) {
     const { setNodeRef, isOver } = useDroppable({ id: party.id });
 
     // Derived Force Info (0-1, 2-3 pair)
@@ -254,8 +254,11 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
                         key={m.id}
                         member={m}
                         fixedGroups={fixedGroups}
+                        isReadOnly={!isAdmin}
                         onShowTooltip={onShowTooltip}
                         onHideTooltip={onHideTooltip}
+                        assignedDay={assignedDay}
+                        assignedTime={assignedTime}
                     />
                 ))}
             </div>
@@ -267,7 +270,7 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
     );
 }
 
-function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip?: (m: Member, r: DOMRect) => void, onHideTooltip?: () => void }) {
+function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHideTooltip, assignedDay, assignedTime }: { member: Member, fixedGroups?: FixedGroup[], isReadOnly?: boolean, onShowTooltip?: (m: Member, r: DOMRect) => void, onHideTooltip?: () => void, assignedDay?: string, assignedTime?: string }) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: member.id,
         disabled: isReadOnly,
@@ -304,7 +307,7 @@ function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHid
                 isDragging ? "opacity-0" : "opacity-100",
                 isReadOnly && "opacity-60 cursor-default"
             )}>
-            <MemberCard member={member} fixedGroup={fixedGroup} />
+            <MemberCard member={member} fixedGroup={fixedGroup} assignedDay={assignedDay} assignedTime={assignedTime} />
         </div>
     );
 }
@@ -330,17 +333,27 @@ const COLOR_MAP: Record<string, string> = {
     'bg-rose-500': 'border-rose-500'
 };
 
-function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup }) {
+function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }: { member: Member, isOverlay?: boolean, fixedGroup?: FixedGroup, assignedDay?: string, assignedTime?: string }) {
     const borderColorClass = fixedGroup ? (COLOR_MAP[fixedGroup.color] || 'border-slate-200') : '';
+
+    // Conflict Check: If forced assigned time exist, but member hasn't applied for it
+    const isConflict = assignedDay && assignedTime && (!member.availability?.[assignedDay]?.includes(assignedTime));
 
     return (
         <div className={cn(
-            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border",
+            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border overflow-hidden",
             isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "shadow-sm",
-            fixedGroup && !isOverlay ? cn("border-2", borderColorClass) : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+            isConflict
+                ? "border-rose-400 bg-rose-50/50 dark:bg-rose-900/10 dark:border-rose-800 shadow-rose-100/50"
+                : (fixedGroup && !isOverlay ? cn("border-2", borderColorClass) : "border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600")
         )}
         >
-            {fixedGroup && (
+            {isConflict && (
+                <div className="absolute top-0 right-0 p-0.5 bg-rose-500 text-white rounded-bl-lg shadow-sm animate-pulse z-10">
+                    <AlertCircle size={10} />
+                </div>
+            )}
+            {fixedGroup && !isConflict && (
                 <div className={cn("absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-sm border-2 border-white", fixedGroup.color)} />
             )}
 
@@ -363,7 +376,7 @@ function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverl
     );
 }
 
-function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[] }) {
+function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDay, assignedTime }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[], assignedDay?: string, assignedTime?: string }) {
     const tooltipWidth = 280;
     let top = rect.top;
     let left = rect.right + 10;
@@ -390,78 +403,91 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
     const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
 
+    const isConflict = assignedDay && assignedTime && (!member.availability?.[assignedDay]?.includes(assignedTime));
+    const slotLabel = assignedTime ? ([...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === assignedTime)?.label || assignedTime) : '';
+
     return (
-        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 w-[280px] animate-in slide-in-from-left-2 duration-200">
-            <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
-                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
-                    {member.class[0]}
+        <div style={style} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-0 w-[280px] animate-in slide-in-from-left-2 duration-200 overflow-hidden">
+            {/* Conflict Warning Header */}
+            {isConflict && (
+                <div className="bg-rose-500 px-4 py-2 text-white flex items-center gap-2">
+                    <AlertCircle size={14} className="animate-bounce" />
+                    <span className="text-[11px] font-black tracking-tight">이 시간대 미신청 인원 ({assignedDay} {slotLabel})</span>
                 </div>
-                <div>
-                    <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span>{member.class}</span>
-                        <span>•</span>
-                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+            )}
+
+            <div className="p-4">
+                <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100 dark:border-slate-700">
+                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow-sm", getClassColor(member.class))}>
+                        {member.class[0]}
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>{member.class}</span>
+                            <span>•</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div className="mb-4">
-                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
-                <div className="space-y-2">
-                    {RAID_DAYS.map(day => {
-                        const slots = member.availability?.[day] || [];
-                        if (slots.length === 0) return null;
+                <div className="mb-4">
+                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                    <div className="space-y-2">
+                        {RAID_DAYS.map(day => {
+                            const slots = member.availability?.[day] || [];
+                            if (slots.length === 0) return null;
 
-                        const sortedSlots = [...slots].sort((a, b) => {
-                            const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
-                            const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
-                            return sortA - sortB;
-                        });
+                            const sortedSlots = [...slots].sort((a, b) => {
+                                const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
+                                const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
+                                return sortA - sortB;
+                            });
 
-                        return (
-                            <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
-                                <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
-                                <div className="flex flex-wrap gap-1 flex-1">
-                                    {sortedSlots.map(t => {
-                                        const slotLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
-                                        return (
-                                            <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
-                                                {slotLabel}
-                                            </span>
-                                        );
-                                    })}
+                            return (
+                                <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
+                                    <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
+                                    <div className="flex flex-wrap gap-1 flex-1">
+                                        {sortedSlots.map(t => {
+                                            const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
+                                            return (
+                                                <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
+                                                    {sLabel}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
-                    {!RAID_DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
-                        <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
-                    )}
-                </div>
-            </div>
-
-            {fixedGroup && (
-                <div>
-                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                        <span>고정 파티 ({fixedGroup.name})</span>
-                        <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
-                    </h4>
-                    <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-                        {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
-                            <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
-                                <div className="flex items-center gap-2">
-                                    <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
-                                    <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
-                                </div>
-                                <span className="text-slate-400 text-[10px]">{gm.class}</span>
-                            </div>
-                        )) : (
-                            <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                            );
+                        })}
+                        {!RAID_DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                            <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
                         )}
                     </div>
                 </div>
-            )}
+
+                {fixedGroup && (
+                    <div>
+                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                            <span>고정 파티 ({fixedGroup.name})</span>
+                            <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
+                        </h4>
+                        <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
+                            {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                                <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
+                                    <div className="flex items-center gap-2">
+                                        <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
+                                        <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
+                                    </div>
+                                    <span className="text-slate-400 text-[10px]">{gm.class}</span>
+                                </div>
+                            )) : (
+                                <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
@@ -469,6 +495,7 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member
 // --- Main Component ---
 export default function RaidPartyMakerV3({ testMode = false }: { testMode?: boolean }) {
     const { loading, isAdmin } = useAuth();
+    const [isMounted, setIsMounted] = useState(false);
 
     // Data State
     const [allMembers, setAllMembers] = useState<Member[]>([]);
@@ -522,6 +549,22 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     // Dnd State for Algo
     const [activeAlgoId, setActiveAlgoId] = useState<string | null>(null);
 
+    // New: Time Selection Modal State
+    const [timeSelectionModal, setTimeSelectionModal] = useState<{
+        isOpen: boolean;
+        member: Member | null;
+        targetPartyId: string | null;
+    }>({ isOpen: false, member: null, targetPartyId: null });
+
+    const handleConfirmTimeSelection = (day: string, time: string) => {
+        if (!timeSelectionModal.member || !timeSelectionModal.targetPartyId) return;
+
+        // Execute move with the selected time
+        executeMove(timeSelectionModal.member.id, timeSelectionModal.targetPartyId, day, time);
+
+        setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null });
+    };
+
     const handleShowTooltip = (member: Member, rect: DOMRect) => {
         setTooltipInfo({ member, rect });
     };
@@ -530,8 +573,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         setTooltipInfo(null);
     };
 
-
     // --- Effects ---
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
     // Close color picker when group changes
     useEffect(() => {
         setIsColorPickerOpen(false);
@@ -696,36 +741,37 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     // --- Sync Fixed Groups to Members ---
     useEffect(() => {
-        if (allMembers.length === 0) return;
+        if (!isMounted || allMembers.length === 0 || fixedGroups.length === 0) return;
 
-        // Create a map of memberId -> fixedGroupId
+        // Use a simple check to prevent infinite loop
         const fixedMap = new Map<string, string>();
         fixedGroups.forEach(fg => {
             (fg.memberIds || []).forEach(mid => fixedMap.set(mid, fg.id));
         });
 
-        // Update function helper
+        let needsUpdate = false;
         const updateMember = (m: Member): Member => {
             const newFixedId = fixedMap.get(m.id);
             if (m.fixedGroupId !== newFixedId) {
+                needsUpdate = true;
                 return { ...m, fixedGroupId: newFixedId };
             }
             return m;
         };
 
-        // Sync to allMembers
-        setAllMembers(prev => prev.map(updateMember));
+        if (needsUpdate) {
+            // Use requestAnimationFrame to defer update and prevent render collision
+            requestAnimationFrame(() => {
+                setAllMembers(prev => prev.map(updateMember));
+                setPool(prev => prev.map(updateMember));
+                setParties(prev => prev.map(p => ({
+                    ...p,
+                    members: p.members.map(updateMember)
+                })));
+            });
+        }
 
-        // Sync to Pool
-        setPool(prev => prev.map(updateMember));
-
-        // Sync to Parties (if members are already assigned there)
-        setParties(prev => prev.map(p => ({
-            ...p,
-            members: p.members.map(updateMember)
-        })));
-
-    }, [fixedGroups]); // Trigger when fixedGroups changes
+    }, [isMounted, fixedGroups, isFixedGroupsLoaded]);
 
     // --- Helper Functions ---
     const getSlotLabel = (id: string) => {
@@ -750,7 +796,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         return party ? party.id : undefined;
     };
 
-    const executeMove = (memberId: string, targetContainerId: string) => {
+    const executeMove = (memberId: string, targetContainerId: string, overrideDay?: string, overrideTime?: string) => {
         const member = findMember(memberId);
         if (!member) return;
 
@@ -777,21 +823,28 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (p) {
                 if (p.members.length >= 4) {
                     alert("파티는 최대 4명까지만 가능합니다.");
-                    // Return to source essentially (or just fail move)
-                    if (sourceContainer === 'pool') newPool.push(member); // Put back
+                    // Return to source
+                    if (sourceContainer === 'pool') newPool.push(member);
                     return;
                 }
                 p.members.push(member);
 
-                // Auto-set time if first member in FORCE
+                // Auto-set time if first member in FORCE OR Override is provided
                 const partyIdx = newParties.findIndex(pIdx => pIdx.id === targetContainerId);
-                if (partyIdx !== -1 && selectedSlot) {
+                if (partyIdx !== -1) {
                     const forceIdx = Math.floor(partyIdx / 2);
                     const p1 = newParties[forceIdx * 2];
                     const p2 = newParties[forceIdx * 2 + 1];
 
-                    // If this is the start of a force configuration or sync is needed
-                    if (!p1.assignedTime || !p2.assignedTime) {
+                    // IF override exists, use it. Otherwise use filter values only if NOT already set.
+                    if (overrideDay && overrideTime) {
+                        p1.assignedDay = overrideDay;
+                        p1.assignedTime = overrideTime;
+                        if (p2) {
+                            p2.assignedDay = overrideDay;
+                            p2.assignedTime = overrideTime;
+                        }
+                    } else if (selectedSlot && (!p1.assignedTime || !p2.assignedTime)) {
                         const day = selectedDay === 'ALL' ? '수' : selectedDay;
                         p1.assignedDay = day;
                         p1.assignedTime = selectedSlot;
@@ -946,6 +999,31 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 // Use Force-level time for validation
                 const assignedDay = p1.assignedDay || p2?.assignedDay;
                 const assignedTime = p1.assignedTime || p2?.assignedTime;
+
+                // --- NEW LOGIC: If Force Time is NOT set ---
+                if (!assignedDay || !assignedTime) {
+                    // NEW: Handle Priority - If filters are already selected, use them immediately
+                    if (selectedDay !== 'ALL' && selectedSlot) {
+                        executeMove(memberId, targetId, selectedDay, selectedSlot);
+                        return;
+                    }
+
+                    // Check if member actually has any availability to offer
+                    const hasAvailability = RAID_DAYS.some(day => (member.availability?.[day]?.length || 0) > 0);
+
+                    if (hasAvailability) {
+                        setTimeSelectionModal({
+                            isOpen: true,
+                            member,
+                            targetPartyId: targetId
+                        });
+                        return; // Stop default execution
+                    } else {
+                        // Minimalist feedback if member has 0 availability
+                        alert(`${member.name}님은 신청한 시간대가 없어 포스 시간을 자동 설정할 수 없습니다.`);
+                        return;
+                    }
+                }
 
                 if (assignedDay && assignedTime) {
                     // Skip validation if moving within the same Force (Avoid redundant alerts)
@@ -1416,7 +1494,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             return;
         }
 
-        const currentForceCount = Math.ceil(parties.length / 2);
         const nextParty1Num = parties.length + 1;
         const nextParty2Num = parties.length + 2;
 
@@ -1425,6 +1502,54 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             { id: `party-${nextParty1Num}`, name: `${nextParty1Num}파티`, members: [] },
             { id: `party-${nextParty2Num}`, name: `${nextParty2Num}파티`, members: [] }
         ]);
+    };
+
+    const removeForce = (forceIdx: number) => {
+        if (!isAdmin) {
+            alert("관리자 권한이 필요합니다.");
+            return;
+        }
+
+        const p1 = parties[forceIdx * 2];
+        const p2 = parties[forceIdx * 2 + 1];
+        const membersToReturn = [...(p1?.members || []), ...(p2?.members || [])];
+
+        const executeDelete = () => {
+            // Return members to pool
+            setPool(prev => {
+                const updated = [...prev, ...membersToReturn];
+                return updated.sort((a, b) => b.power - a.power);
+            });
+
+            // Remove and Re-index
+            const filtered = parties.filter((_, idx) => idx !== forceIdx * 2 && idx !== forceIdx * 2 + 1);
+            const reindexed = filtered.map((p, idx) => ({
+                ...p,
+                id: `party-${idx + 1}`,
+                name: `${idx + 1}파티`
+            }));
+
+            setParties(reindexed);
+            setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+        };
+
+        if (membersToReturn.length > 0) {
+            setConfirmationModal({
+                isOpen: true,
+                message: `${forceIdx + 1}포스를 삭제하시겠습니까?\n배정된 멤버(${membersToReturn.length}명)는 대기 명단으로 돌아갑니다.`,
+                onConfirm: executeDelete,
+                onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+            });
+        } else {
+            // Even if empty, show a soft modal for consistency or just delete. 
+            // Let's show modal to avoid accidental clicks.
+            setConfirmationModal({
+                isOpen: true,
+                message: `${forceIdx + 1}포스를 삭제하시겠습니까?`,
+                onConfirm: executeDelete,
+                onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+            });
+        }
     };
 
     const filteredPool = pool.filter(m => {
@@ -1681,26 +1806,46 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                             const forceTimeLabel = forceDay && forceTime
                                 ? `${forceDay}(${getNextDate(forceDay)}) ${getSlotLabel(forceTime)}`
-                                : "시간 미정";
+                                : "";
 
                             return (
-                                <div key={`force-${forceNumber}`} className="bg-white/40 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 overflow-hidden">
+                                <div key={`force-${forceNumber}`} className={cn(
+                                    "bg-white/40 dark:bg-slate-800/40 rounded-xl border overflow-hidden transition-all duration-300",
+                                    forceDay && forceTime ? "border-slate-200 dark:border-slate-700 shadow-sm" : "border-dashed border-rose-300 dark:border-rose-900/50 bg-rose-50/10"
+                                )}>
                                     {/* Force Header */}
-                                    <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-100/50 dark:bg-slate-800/80">
+                                    <div className={cn(
+                                        "px-4 py-2 border-b flex justify-between items-center",
+                                        forceDay && forceTime ? "bg-slate-100/50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700" : "bg-rose-50/30 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800"
+                                    )}>
                                         <div className="flex items-center gap-2">
                                             <span className="text-sm font-black text-slate-700 dark:text-slate-200">{forceNumber} 포스</span>
-                                            {forceDay && forceTime && (
-                                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700 font-bold flex items-center gap-1">
+                                            {forceDay && forceTime ? (
+                                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700 font-bold flex items-center gap-1 animate-in zoom-in-95">
                                                     <Clock size={10} /> {forceTimeLabel}
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:text-rose-400 dark:border-rose-800 font-black animate-pulse flex items-center gap-1">
+                                                    <AlertCircle size={10} /> 시간을 지정해 주세요
                                                 </span>
                                             )}
                                         </div>
+
+                                        {isAdmin && (
+                                            <button
+                                                onClick={() => removeForce(forceIndex)}
+                                                className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all active:scale-95"
+                                                title="포스 삭제"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        )}
                                     </div>
 
                                     {/* Parties Grid (2 items) */}
                                     <div className="p-4 grid grid-cols-2 gap-4">
-                                        {party1 && <RaidPartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} />}
-                                        {party2 && <RaidPartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} />}
+                                        {party1 && <RaidPartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} isAdmin={isAdmin} assignedDay={forceDay} assignedTime={forceTime} />}
+                                        {party2 && <RaidPartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} isAdmin={isAdmin} assignedDay={forceDay} assignedTime={forceTime} />}
                                     </div>
                                 </div>
                             );
@@ -2218,6 +2363,79 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     </div>
                 )
             }
+
+            {/* Time Selection Modal (When force time is missing) */}
+            {timeSelectionModal.isOpen && timeSelectionModal.member && (
+                <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                            <div className="flex items-center gap-3">
+                                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white shadow-sm", getClassColor(timeSelectionModal.member.class))}>
+                                    {timeSelectionModal.member.class[0]}
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 dark:text-white">{timeSelectionModal.member.name}</h3>
+                                    <p className="text-[11px] text-slate-500">포스 시간을 설정하고 멤버를 배치합니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
+                                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="p-6">
+                            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-xl flex items-start gap-3">
+                                <AlertTriangle className="text-amber-500 shrink-0" size={16} />
+                                <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed font-medium">
+                                    현재 포스 시간이 설정되어 있지 않습니다.<br />
+                                    <strong>{timeSelectionModal.member.name}</strong>님이 신청하신 시간대 중 하나를 선택해 주세요.
+                                </p>
+                            </div>
+
+                            <div className="space-y-4 max-h-[300px] overflow-y-auto px-1 custom-scrollbar">
+                                {RAID_DAYS.map(day => {
+                                    const slots = timeSelectionModal.member?.availability?.[day] || [];
+                                    if (slots.length === 0) return null;
+
+                                    return (
+                                        <div key={day} className="space-y-2">
+                                            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">{day}요일</h4>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {slots.map(tId => {
+                                                    const s = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === tId);
+                                                    return (
+                                                        <button
+                                                            key={`${day}-${tId}`}
+                                                            onClick={() => handleConfirmTimeSelection(day, tId)}
+                                                            className="flex flex-col items-center justify-center p-3 rounded-xl border-2 border-slate-100 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/20 transition-all group active:scale-95"
+                                                        >
+                                                            <span className="text-sm font-black text-slate-700 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">{s?.label}</span>
+                                                            <span className="text-[10px] text-slate-400">{s?.fullLabel}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+                            <button
+                                onClick={() => setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null })}
+                                className="w-full py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                            >
+                                취소
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {
                 tooltipInfo && (
                     <MemberDetailTooltip

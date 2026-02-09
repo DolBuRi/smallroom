@@ -12,13 +12,20 @@ import PartyApply from '@/components/party-apply';
 import MarketCalculator from '@/components/market-calculator';
 import AlerterIntegration from '@/components/alerter-integration';
 import VisitorStats from '@/components/visitor-stats';
-import RaidPartyMakerV3 from '@/components/raid-party-maker';
+import dynamic from 'next/dynamic';
+
+const RaidPartyMakerV3 = dynamic(() => import('@/components/raid-party-maker'), { ssr: false });
 
 type Tab = 'dashboard' | 'members' | 'ranking' | 'raid' | 'raid_v2' | 'raid_apply' | 'calculator' | 'alerter_integration' | 'party_maker';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('members');
   const { user, logout, loading, loginWithCredentials } = useAuth();
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginId, setLoginId] = useState('');
   const [loginPw, setLoginPw] = useState('');
@@ -86,6 +93,17 @@ export default function Home() {
       setIsLoggingIn(false);
     }
   };
+
+  if (!isMounted) {
+    return (
+      <main className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 animate-pulse">
+          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="font-black text-indigo-500 tracking-widest text-sm">LOADING ASSETS...</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-transparent text-slate-700 font-sans selection:bg-purple-200">
@@ -177,7 +195,7 @@ export default function Home() {
             {activeTab === 'raid_apply' && <PartyApply />}
             {activeTab === 'raid' && <RaidManager />}
             {activeTab === 'raid_v2' && <RaidManagerV2 />}
-            {activeTab === 'party_maker' && <RaidPartyMakerV3 testMode={debugClicks >= 5} />}
+            {activeTab === 'party_maker' && isMounted && <RaidPartyMakerV3 testMode={debugClicks >= 5} />}
             {activeTab === 'members' && <MemberList />}
             {activeTab === 'ranking' && <RankingBoard />}
             {/* Alerter Always Mounted (Hidden when inactive) to keep Alarm running */}
