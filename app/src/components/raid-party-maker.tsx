@@ -111,7 +111,7 @@ const getClassColor = (className: string) => {
 
 // --- Main Component Stub ---
 export default function RaidPartyMakerV3({ testMode = false }: { testMode?: boolean }) {
-    const { loading } = useAuth();
+    const { loading, isAdmin } = useAuth();
 
     // Data State
     const [allMembers, setAllMembers] = useState<Member[]>([]);
@@ -377,14 +377,25 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         return slot ? slot.label : id;
     };
 
+    const findMember = (id: string) => {
+        const inPool = pool.find(m => m.id === id);
+        if (inPool) return inPool;
+        for (const p of parties) {
+            const inParty = p.members.find(m => m.id === id);
+            if (inParty) return inParty;
+        }
+        return allMembers.find(m => m.id === id);
+    };
+
     const findContainer = (id: string): string | undefined => {
+        if (id === 'pool') return 'pool';
         if (pool.find(m => m.id === id)) return 'pool';
         const party = parties.find(p => p.members.find(m => m.id === id));
         return party ? party.id : undefined;
     };
 
     const executeMove = (memberId: string, targetContainerId: string) => {
-        const member = allMembers.find(m => m.id === memberId);
+        const member = findMember(memberId);
         if (!member) return;
 
         let newPool = [...pool];
@@ -530,11 +541,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     // --- Handlers ---
     const handleDragStart = (event: DragStartEvent) => {
-        if (selectedDay === 'ALL' || !selectedSlot) {
-            alert("전체 보기 또는 시간 전체 상태에서는 파티를 편성할 수 없습니다.\n먼저 특정 요일과 시간을 선택해주세요.");
-            return;
-        }
-        const member = allMembers.find(m => m.id === event.active.id);
+        const member = findMember(event.active.id as string);
         if (member) setDraggedMember(member);
     };
 
@@ -547,7 +554,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         let targetId = over.id as string;
 
         // If dropped on member, find container
-        const overMember = allMembers.find(m => m.id === targetId);
+        const overMember = findMember(targetId);
         if (overMember) {
             targetId = findContainer(targetId) || 'pool';
         }
@@ -555,7 +562,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const sourceId = findContainer(memberId);
         if (sourceId === targetId) return;
 
-        const member = allMembers.find(m => m.id === memberId);
+        const member = findMember(memberId);
         if (!member) return;
 
         // Validation: Time Conflict
@@ -900,7 +907,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     // Smart Pick (Best Slot for remaining pool)
                     // ... (Existing implementation kept) ...
                     let candidateSlots: { day: string, slot: string, score: number }[] = [];
-                    const daysToScan = matchType === 'DAY' ? matchOptions.selectedDays : RAID_DAYS;
+                    const daysToScan = RAID_DAYS;
                     const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
 
                     daysToScan.forEach(d => {
@@ -1049,7 +1056,17 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             <h2 className="font-bold flex items-center gap-2"><Users size={18} className="text-indigo-500" /> 대기 멤버 ({sortedPool.length})</h2>
                         </div>
                         <div className="flex gap-1">
-                            <button onClick={() => setIsFixedGroupModalOpen(true)} className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300" title="고정 파티 관리">
+                            <button
+                                onClick={() => {
+                                    if (!isAdmin) {
+                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                        return;
+                                    }
+                                    setIsFixedGroupModalOpen(true);
+                                }}
+                                className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                                title="고정 파티 관리"
+                            >
                                 <Settings size={14} /> 고정 파티 설정
                             </button>
                         </div>
@@ -1153,7 +1170,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             ) : (
                                 /* ALL View Subtitle */
                                 <div className="py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-700/50">
-                                    <span className="text-xs font-medium">전체 목록에서는 리스트 확인만 가능합니다.</span>
+                                    <span className="text-xs font-medium">전체 목록에서도 드래그하여 배치가 가능합니다.</span>
                                 </div>
                             )}
                         </div>
@@ -1163,7 +1180,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         id="pool"
                         members={sortedPool}
                         fixedGroups={fixedGroups}
-                        isReadOnly={selectedDay === 'ALL' || !selectedSlot}
+                        isReadOnly={false}
                         onShowTooltip={handleShowTooltip}
                         onHideTooltip={handleHideTooltip}
                     />
@@ -1174,10 +1191,28 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     <div className="p-4 border-b flex justify-between items-center bg-white/50 dark:bg-slate-800/50">
                         <h2 className="font-bold flex items-center gap-2"><Shield size={18} className="text-rose-500" /> 포스 구성 ({Math.ceil(parties.length / 2)})</h2>
                         <div className="flex items-center gap-2">
-                            <button onClick={() => setIsAlgoSettingsModalOpen(true)} className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
+                            <button
+                                onClick={() => {
+                                    if (!isAdmin) {
+                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                        return;
+                                    }
+                                    setIsAlgoSettingsModalOpen(true);
+                                }}
+                                className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                            >
                                 <Settings2 size={14} /> 매칭 알고리즘 수정
                             </button>
-                            <button onClick={() => setIsAutoMatchModalOpen(true)} className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1">
+                            <button
+                                onClick={() => {
+                                    if (!isAdmin) {
+                                        alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                        return;
+                                    }
+                                    setIsAutoMatchModalOpen(true);
+                                }}
+                                className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-105 flex items-center gap-1"
+                            >
                                 <Sparkles size={14} /> 자동 매칭 시작
                             </button>
                         </div>
@@ -1228,8 +1263,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                                     {/* Parties Grid (2 items) */}
                                     <div className="p-4 grid grid-cols-2 gap-4">
-                                        {party1 && <RaidPartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} />}
-                                        {party2 && <RaidPartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} />}
+                                        {party1 && <RaidPartySlot key={party1.id} party={party1} index={forceIndex * 2} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} />}
+                                        {party2 && <RaidPartySlot key={party2.id} party={party2} index={forceIndex * 2 + 1} fixedGroups={fixedGroups} onShowTooltip={handleShowTooltip} onHideTooltip={handleHideTooltip} />}
                                     </div>
                                 </div>
                             );
@@ -1841,7 +1876,7 @@ function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, on
 }
 
 // Renamed to force HMR update
-function RaidPartySlot({ party, fixedGroups, index }: { party: Party, fixedGroups?: FixedGroup[], index: number }) {
+function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip }: { party: Party, fixedGroups?: FixedGroup[], index: number, onShowTooltip: (m: Member, r: DOMRect) => void, onHideTooltip: () => void }) {
     const { setNodeRef, isOver } = useDroppable({ id: party.id });
 
     // Derived Force Info (0-1, 2-3 pair)
@@ -1896,7 +1931,13 @@ function RaidPartySlot({ party, fixedGroups, index }: { party: Party, fixedGroup
                     </div>
                 )}
                 {party.members.map(m => (
-                    <DraggableMember key={m.id} member={m} fixedGroups={fixedGroups} />
+                    <DraggableMember
+                        key={m.id}
+                        member={m}
+                        fixedGroups={fixedGroups}
+                        onShowTooltip={onShowTooltip}
+                        onHideTooltip={onHideTooltip}
+                    />
                 ))}
             </div>
 
@@ -1944,7 +1985,7 @@ function DraggableMember({ member, fixedGroups, isReadOnly, onShowTooltip, onHid
                 "touch-none",
                 !isReadOnly && "cursor-grab active:cursor-grabbing", // Only show grab cursor if not read-only
                 isDragging ? "opacity-0" : "opacity-100", // Hide original while dragging
-                isReadOnly && "pointer-events-none" // Optional: disable all interactions
+                isReadOnly && "opacity-60 cursor-default" // Hint read-only status without blocking clicks
             )}>
             <MemberCard member={member} fixedGroup={fixedGroup} />
         </div>
@@ -2009,16 +2050,29 @@ function MemberCard({ member, isOverlay, fixedGroup }: { member: Member, isOverl
 }
 
 function MemberDetailTooltip({ member, rect, fixedGroups, allMembers }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[] }) {
-    // Calculate Position (Right of the element, centered vertically or aligned top)
-    // Simple: Fixed position based on rect
+    const tooltipWidth = 280;
+    let top = rect.top;
+    let left = rect.right + 10;
+
+    if (typeof window !== 'undefined') {
+        if (left + tooltipWidth > window.innerWidth - 20) {
+            left = rect.left - tooltipWidth - 10;
+        }
+        left = Math.max(10, left);
+        if (top + 300 > window.innerHeight - 10) {
+            top = window.innerHeight - 300 - 10;
+        }
+        top = Math.max(10, top);
+    }
+
     const style: React.CSSProperties = {
         position: 'fixed',
-        top: rect.top,
-        left: rect.right + 10,
+        top: top,
+        left: left,
         zIndex: 9999,
+        pointerEvents: 'none',
     };
 
-    // Find Fixed Group Members (Match by ID or Name for robustness)
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
     const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
 

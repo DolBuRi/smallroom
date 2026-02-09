@@ -421,7 +421,13 @@ export default function MemberList() {
 
                 <div className="flex items-center gap-3">
                     <button
-                        onClick={() => window.open('https://docs.google.com/spreadsheets/d/1L3XMo2hOd9drdGPT25S3kNdajxfVCeHf6k0Oznz3K70/edit?gid=0#gid=0', '_blank')}
+                        onClick={() => {
+                            if (!isAdmin) {
+                                alert("관리자 권한이 필요합니다.");
+                                return;
+                            }
+                            window.open('https://docs.google.com/spreadsheets/d/1L3XMo2hOd9drdGPT25S3kNdajxfVCeHf6k0Oznz3K70/edit?gid=0#gid=0', '_blank');
+                        }}
                         className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-emerald-100 shadow-sm dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
                     >
                         <Sheet size={18} /> 구글 시트

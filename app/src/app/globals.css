@@ -36,8 +36,8 @@
   --radius: 1.5rem;
 }
 
+/* Softer, more muted background to reduce eye strain */
 body {
-  /* Softer, more muted background to reduce eye strain */
   background: #f1f3f6;
   background-image: radial-gradient(at 0% 0%, rgba(224, 231, 255, 0.5) 0, transparent 50%),
     radial-gradient(at 50% 0%, rgba(245, 243, 255, 0.5) 0, transparent 50%),
@@ -48,6 +48,31 @@ body {
   color: #334155;
   /* Slate 700 - softer than black */
   font-family: 'Outfit', 'Inter', sans-serif;
+
+  /* Make the entire site feel like a native app */
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  cursor: default;
+}
+
+/* Interactive elements should show pointer */
+button,
+a,
+[role="button"],
+select {
+  cursor: pointer !important;
+}
+
+/* Ensure inputs and textareas still allow text selection and show text cursor */
+input,
+textarea,
+[contenteditable="true"],
+.selectable-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
 }
 
 .dark body {
