@@ -198,6 +198,13 @@ export default function RankingBoard() {
     const [sortBy, setSortBy] = useState<'power' | 'score'>('power');
 
     const filtered = data
+        .filter(m => m && m.name && m.id) // 1. 유효한 데이터만 필터링
+        .reduce((acc, current) => { // 2. 중복 ID 제거
+            if (!acc.find(item => item.id === current.id)) {
+                acc.push(current);
+            }
+            return acc;
+        }, [] as GuildMember[])
         .filter(m => activeTab === 'All' ? true : m.class === activeTab)
         .sort((a, b) => {
             if (sortBy === 'power') return b.power - a.power;

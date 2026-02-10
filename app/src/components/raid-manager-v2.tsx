@@ -20,6 +20,14 @@ interface RaidApplication {
         [key: string]: string[];
     };
     updatedAt: string;
+    fixedGroupId?: string;
+}
+
+interface FixedGroup {
+    id: string;
+    name: string;
+    color: string;
+    memberIds: string[];
 }
 
 // Order: Wed -> Tue (AION Raid Week)
@@ -91,6 +99,27 @@ const getClassColor = (className: string) => {
     }
 };
 
+const COLOR_MAP_TEXT: Record<string, string> = {
+    'bg-slate-500': 'text-slate-500',
+    'bg-red-500': 'text-red-500',
+    'bg-orange-500': 'text-orange-500',
+    'bg-amber-500': 'text-amber-500',
+    'bg-yellow-500': 'text-yellow-500',
+    'bg-lime-500': 'text-lime-500',
+    'bg-green-500': 'text-green-500',
+    'bg-emerald-500': 'text-emerald-500',
+    'bg-teal-500': 'text-teal-500',
+    'bg-cyan-500': 'text-cyan-500',
+    'bg-sky-500': 'text-sky-500',
+    'bg-blue-500': 'text-blue-500',
+    'bg-indigo-500': 'text-indigo-500',
+    'bg-violet-500': 'text-violet-500',
+    'bg-purple-500': 'text-purple-500',
+    'bg-fuchsia-500': 'text-fuchsia-500',
+    'bg-pink-500': 'text-pink-500',
+    'bg-rose-500': 'text-rose-500'
+};
+
 // --- Helper Components ---
 
 const ClassIcon = ({ className }: { className: string }) => {
@@ -101,34 +130,45 @@ const ClassIcon = ({ className }: { className: string }) => {
     );
 };
 
-const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip }: { member: RaidApplication, compact?: boolean, onShowTooltip: (m: RaidApplication, r: DOMRect) => void, onHideTooltip: () => void }) => (
-    <div
-        onMouseEnter={(e) => onShowTooltip(member, e.currentTarget.getBoundingClientRect())}
-        onMouseLeave={onHideTooltip}
-        className={cn(
-            "flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-lg shadow-sm transition-all hover:shadow-md cursor-default",
-            compact ? "p-2 px-3" : "p-3 px-4"
-        )}
-    >
-        <div className="flex items-center gap-3">
-            <ClassIcon className={member.class} />
-            <div className="flex flex-col">
-                <span className={cn("font-bold text-slate-700 dark:text-slate-200 leading-none", compact ? "text-xs" : "text-sm")}>
-                    {member.nickname}
+import { Link } from 'lucide-react';
+
+const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip, fixedGroups = [] }: { member: RaidApplication, compact?: boolean, onShowTooltip: (m: RaidApplication, r: DOMRect) => void, onHideTooltip: () => void, fixedGroups?: FixedGroup[] }) => {
+    const fixedGroup = member.fixedGroupId ? fixedGroups.find(g => g.id === member.fixedGroupId) : null;
+
+    return (
+        <div
+            onMouseEnter={(e) => onShowTooltip(member, e.currentTarget.getBoundingClientRect())}
+            onMouseLeave={onHideTooltip}
+            className={cn(
+                "flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-lg shadow-sm transition-all hover:shadow-md cursor-default",
+                compact ? "p-2 px-3" : "p-3 px-4"
+            )}
+        >
+            <div className="flex items-center gap-3">
+                <ClassIcon className={member.class} />
+                <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5">
+                        <span className={cn("font-bold text-slate-700 dark:text-slate-200 leading-none", compact ? "text-xs" : "text-sm")}>
+                            {member.nickname}
+                        </span>
+                        {fixedGroup && (
+                            <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
+                        )}
+                    </div>
+                    {!compact && <span className="text-[10px] text-slate-400 mt-0.5">{member.class}</span>}
+                </div>
+            </div>
+            <div className="text-right">
+                <span className={cn("font-black text-slate-900 dark:text-slate-100", compact ? "text-xs" : "text-sm")}>
+                    {member.power.toLocaleString()}
                 </span>
-                {!compact && <span className="text-[10px] text-slate-400 mt-0.5">{member.class}</span>}
+                {!compact && <span className="text-[10px] text-slate-400 block -mt-0.5">전투력</span>}
             </div>
         </div>
-        <div className="text-right">
-            <span className={cn("font-black text-slate-900 dark:text-slate-100", compact ? "text-xs" : "text-sm")}>
-                {member.power.toLocaleString()}
-            </span>
-            {!compact && <span className="text-[10px] text-slate-400 block -mt-0.5">전투력</span>}
-        </div>
-    </div>
-);
+    );
+};
 
-function MemberDetailTooltip({ member, rect }: { member: RaidApplication, rect: DOMRect }) {
+function MemberDetailTooltip({ member, rect, fixedGroups = [] }: { member: RaidApplication, rect: DOMRect, fixedGroups?: FixedGroup[] }) {
     const tooltipWidth = 280;
     let top = rect.top;
     let left = rect.right + 10;
@@ -208,6 +248,20 @@ function MemberDetailTooltip({ member, rect }: { member: RaidApplication, rect: 
                         )}
                     </div>
                 </div>
+
+                {member.fixedGroupId && (
+                    <div className="mt-4">
+                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">고정 파티 정보</h4>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 border border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-2">
+                                <Link size={12} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroups.find(g => g.id === member.fixedGroupId)?.color || ''] || 'text-slate-400')} strokeWidth={3} />
+                                <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">
+                                    {fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '알 수 없는 그룹'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -281,12 +335,13 @@ const HeatmapCell = ({
     );
 };
 
-function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave }: {
+function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGroups = [] }: {
     day: string,
     apps: RaidApplication[],
     rect: DOMRect,
     onMouseEnter: () => void,
-    onMouseLeave: () => void
+    onMouseLeave: () => void,
+    fixedGroups?: FixedGroup[]
 }) {
     const tooltipWidth = 220;
 
@@ -340,17 +395,25 @@ function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave }: {
                     <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded text-[10px]">{apps.length}명</span>
                 </div>
                 <div className="space-y-1 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
-                    {apps.map(app => (
-                        <div
-                            key={app.id}
-                            className="flex justify-between items-center p-1.5"
-                        >
-                            <span className="text-slate-700 dark:text-slate-300 font-bold">{app.nickname}</span>
-                            <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm", getClassColor(app.class))}>
-                                {app.class}
-                            </span>
-                        </div>
-                    ))}
+                    {apps.map(app => {
+                        const fixedGroup = app.fixedGroupId ? fixedGroups.find(g => g.id === app.fixedGroupId) : null;
+                        return (
+                            <div
+                                key={app.id}
+                                className="flex justify-between items-center p-1.5"
+                            >
+                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                    <span className="text-slate-700 dark:text-slate-300 font-bold truncate">{app.nickname}</span>
+                                    {fixedGroup && (
+                                        <Link size={10} className={cn("rotate-45 shrink-0", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
+                                    )}
+                                </div>
+                                <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm shrink-0", getClassColor(app.class))}>
+                                    {app.class}
+                                </span>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         </div>
@@ -362,6 +425,7 @@ function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave }: {
 export default function RaidManagerV2({ testMode = false }: { testMode?: boolean }) {
     const { isAdmin } = useAuth();
     const [applications, setApplications] = useState<RaidApplication[]>([]);
+    const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
 
     // Detailed View State
     const [selectedDay, setSelectedDay] = useState<string>('전체');
@@ -420,19 +484,60 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     class: cls,
                     power: Math.floor(Math.random() * (5000 - 1000) + 1000),
                     availability,
-                    updatedAt: new Date().toISOString()
+                    updatedAt: new Date().toISOString(),
+                    fixedGroupId: i < 5 ? 'fg-1' : (i < 10 ? 'fg-2' : undefined)
                 };
             });
             setApplications(mockApps);
+            setFixedGroups([
+                { id: 'fg-1', name: '테스트 1팀', color: 'bg-rose-500', memberIds: [] },
+                { id: 'fg-2', name: '테스트 2팀', color: 'bg-indigo-500', memberIds: [] }
+            ]);
             return;
         }
 
-        const unsubscribeApps = onValue(ref(db, 'raid_applications'), (snapshot) => {
+        // 1. Load Fixed Groups
+        const unsubscribeGroups = onValue(ref(db, 'raid_fixed_groups'), (snapshot) => {
             const data = snapshot.val();
-            setApplications(data ? Object.values(data) : []);
+            setFixedGroups(data ? Object.values(data) : []);
+        });
+
+        // 2. Combined Listener for Members (Roster) and Raid Applications
+        // We need the roster to map nickname -> fixedGroupId
+        let currentRoster: any[] = [];
+
+        const membersRef = ref(db, 'members');
+        const unsubscribeMembers = onValue(membersRef, (snap) => {
+            const data = snap.val();
+            currentRoster = data ? Object.values(data) : [];
+            // Trigger refresh of applications with new roster info if apps already exist
+            setApplications(prev => prev.map(app => {
+                const rosterMember = currentRoster.find(m => m.name === app.nickname);
+                return { ...app, fixedGroupId: rosterMember?.fixedGroupId };
+            }));
+        });
+
+        const appsRef = ref(db, 'raid_applications');
+        const unsubscribeApps = onValue(appsRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                const appsList = Object.values(data) as any[];
+                const enriched = appsList.map(app => {
+                    const rosterMember = currentRoster.find(m => m.name === app.nickname);
+                    return {
+                        ...app,
+                        fixedGroupId: rosterMember?.fixedGroupId
+                    };
+                });
+                setApplications(enriched);
+            } else {
+                setApplications([]);
+            }
         });
 
         return () => {
+            unsubscribeGroups();
+            unsubscribeMembers();
             unsubscribeApps();
         };
     }, [testMode]);
@@ -714,6 +819,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                                                         compact
                                                                         onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
                                                                         onHideTooltip={() => setTooltipInfo(null)}
+                                                                        fixedGroups={fixedGroups}
                                                                     />
                                                                 ))}
                                                             </div>
@@ -742,6 +848,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                     member={app}
                                     onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
                                     onHideTooltip={() => setTooltipInfo(null)}
+                                    fixedGroups={fixedGroups}
                                 />
                             ))}
                             {dayApplicants.length === 0 && (
@@ -764,6 +871,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                         }
                     }}
                     onMouseLeave={hideHeatmapTooltip}
+                    fixedGroups={fixedGroups}
                 />
             )}
 
@@ -771,6 +879,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 <MemberDetailTooltip
                     member={tooltipInfo.member}
                     rect={tooltipInfo.rect}
+                    fixedGroups={fixedGroups}
                 />
             )}
         </div>

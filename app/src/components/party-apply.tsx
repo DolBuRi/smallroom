@@ -80,7 +80,19 @@ import { useAuth } from '@/context/AuthContext';
 
 // --- Main Component ---
 
-export default function PartyApply({ testMode = false }: { testMode?: boolean }) {
+export default function PartyApply({
+    testMode = false,
+    showTitle = true,
+    hideDelete = false,
+    saveButtonPosition = 'top',
+    forceSingleColumn = false
+}: {
+    testMode?: boolean,
+    showTitle?: boolean,
+    hideDelete?: boolean,
+    saveButtonPosition?: 'top' | 'bottom',
+    forceSingleColumn?: boolean
+}) {
     const { isAdmin } = useAuth();
     const [nickname, setNickname] = useState('');
     const [availability, setAvailability] = useState<Record<string, string[]>>({
@@ -161,6 +173,19 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
         }));
     };
 
+    const triggerSheetSync = async () => {
+        // 여기에 복사한 웹 앱 URL을 넣으세요.
+        const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzM6EaqC4B298x6B4OAp4_Ng6FsyDn1jVoVvEGN7d7zR5APYBzGYeVWxDGEn2vHtYjE/exec";
+        if (GAS_WEBAPP_URL.includes("여기에")) return;
+
+        try {
+            await fetch(GAS_WEBAPP_URL, { mode: 'no-cors' });
+            console.log("Sheet sync triggered");
+        } catch (e) {
+            console.error("Sheet sync failed", e);
+        }
+    };
+
     const handleSave = async () => {
         const trimmedName = nickname.trim();
         if (!trimmedName) {
@@ -207,6 +232,7 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
 
             setLastSaved(new Date().toLocaleString());
             alert('파티 신청 정보가 저장되었습니다.');
+            triggerSheetSync(); // 저장 성공 시 시트 동기화 신호 전송
         } catch (e) {
             console.error(e);
             alert('저장 중 오류가 발생했습니다.');
@@ -240,6 +266,7 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
                     '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': []
                 });
                 setLastSaved(null);
+                triggerSheetSync(); // 삭제 성공 시 시트 동기화 신호 전송
             } else {
                 alert('신청 정보를 찾을 수 없습니다.');
             }
@@ -325,42 +352,46 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
 
     return (
         <div className="space-y-10 animate-in fade-in duration-700">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                <div>
-                    <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
-                        <Calendar className="text-indigo-500 dark:text-indigo-400" size={36} />
-                        성역 파티 신청 ({getCurrentWeek()})
-                        {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse ml-2">TEST MODE</span>}
-                    </h2>
-                    <div className="mt-[17px]">
-                        <p className="text-slate-500 dark:text-slate-300 text-sm font-medium">
-                            파티 매칭을 위해 참가 가능한 모든 시간대를 선택해 주세요.
-                        </p>
+            {showTitle && (
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="w-full">
+                        <h2 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tighter">
+                            <Calendar className="text-indigo-500 dark:text-indigo-400 shrink-0" size={28} />
+                            <span className="truncate">성역 파티 신청 ({getCurrentWeek()})</span>
+                            {testMode && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full animate-pulse ml-2 shrink-0">TEST</span>}
+                        </h2>
+                        <div className="mt-2">
+                            <p className="text-slate-400 dark:text-slate-400 text-xs md:text-sm font-bold">
+                                파티 매칭을 위해 참여 가능한 시간대를 선택해 주세요.
+                            </p>
+                        </div>
                     </div>
+                    {lastSaved && (
+                        <div className="bg-emerald-50 text-emerald-600 px-4 py-2 rounded-2xl text-[10px] font-black border border-emerald-100 shadow-sm tracking-widest uppercase">
+                            Last Saved: {lastSaved}
+                        </div>
+                    )}
                 </div>
-                {lastSaved && (
-                    <div className="bg-emerald-50 text-emerald-600 px-4 py-2 rounded-2xl text-[10px] font-black border border-emerald-100 shadow-sm tracking-widest uppercase">
-                        Last Saved: {lastSaved}
-                    </div>
-                )}
-            </div>
+            )}
 
-            <div className="glass-panel p-10 flex flex-col lg:flex-row gap-10 items-end">
+            <div className="glass-panel p-6 md:p-10 flex flex-col lg:flex-row gap-6 md:gap-8 items-stretch lg:items-end">
                 <div className="flex-1 w-full lg:max-w-lg">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 mb-3 block">Participant Identity</label>
                     <div className="relative">
-                        <Users className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={24} />
-                        <input
-                            type="text"
-                            placeholder="닉네임을 입력해주세요"
-                            value={nickname}
-                            onChange={(e) => setNickname(e.target.value)}
-                            className="w-full h-16 bg-slate-50/50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-3xl pl-14 pr-6 text-slate-800 dark:text-slate-200 text-lg font-black focus:border-indigo-200 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-slate-800 outline-none transition-all placeholder:text-slate-200 dark:placeholder:text-slate-600"
-                        />
-                        <div className="absolute -bottom-8 left-2 text-[11px] font-black tracking-tight flex items-center gap-3">
+                        <div className="relative">
+                            <Users className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={24} />
+                            <input
+                                type="text"
+                                placeholder="닉네임을 입력해주세요"
+                                value={nickname}
+                                onChange={(e) => setNickname(e.target.value)}
+                                className="w-full h-16 bg-slate-50/50 dark:bg-slate-800/50 border-2 border-slate-100 dark:border-slate-700 rounded-3xl pl-14 pr-6 text-slate-800 dark:text-slate-200 text-lg font-black focus:border-indigo-200 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-slate-800 outline-none transition-all placeholder:text-slate-200 dark:placeholder:text-slate-600"
+                            />
+                        </div>
+                        <div className="relative mt-2 md:absolute md:-bottom-8 md:left-2 md:mt-0 text-[10px] md:text-[11px] font-black tracking-tight flex items-center gap-3">
                             {nickname && !members.some(m => m.name === nickname) && (
                                 <div className="text-amber-500 flex items-center gap-2">
-                                    <AlertCircle size={14} /> 외부 인원입니다. 직업과 전투력을 확인해 주세요.
+                                    <AlertCircle size={14} /> 외부 인원입니다. 직업과 전투력을 작성해 주세요.
                                 </div>
                             )}
                             {nickname && members.some(m => m.name === nickname) && (
@@ -374,68 +405,80 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
                                 </div>
                             )}
                         </div>
+
+                        {/* Manual Class/Power Fields (Moved here for better flow) */}
+                        {nickname && !members.some(m => m.name === nickname) && (
+                            <div className="flex gap-4 items-end animate-in slide-in-from-top-4 duration-500 w-full mt-10 lg:mt-12">
+                                <div className="flex-1">
+                                    <label className="text-[10px] font-black text-slate-400 capitalize mb-2 block ml-1">Class</label>
+                                    <select
+                                        value={manualClass}
+                                        onChange={(e) => setManualClass(e.target.value)}
+                                        className="w-full h-16 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-3xl px-6 text-slate-700 dark:text-slate-200 font-black outline-none focus:border-indigo-200 dark:focus:border-indigo-500/50 shadow-sm appearance-none"
+                                    >
+                                        {['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'].map(c => (
+                                            <option key={c} value={c}>{c}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-[10px] font-black text-slate-400 capitalize mb-2 block ml-1">Power</label>
+                                    <input
+                                        type="number"
+                                        value={manualPower}
+                                        onChange={(e) => setManualPower(e.target.value)}
+                                        className="w-full h-16 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-3xl px-6 text-slate-700 dark:text-slate-200 font-black outline-none focus:border-indigo-200 dark:focus:border-indigo-500/50 shadow-sm"
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {nickname && !members.some(m => m.name === nickname) && (
-                    <div className="flex gap-4 items-end animate-in zoom-in duration-500 w-full lg:w-auto">
-                        <div className="flex-1 lg:w-40">
-                            <label className="text-[10px] font-black text-slate-400 capitalize mb-2 block ml-1">Class</label>
-                            <select
-                                value={manualClass}
-                                onChange={(e) => setManualClass(e.target.value)}
-                                className="w-full h-16 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-3xl px-6 text-slate-700 dark:text-slate-200 font-black outline-none focus:border-indigo-200 dark:focus:border-indigo-500/50 shadow-sm appearance-none"
+
+                {(saveButtonPosition === 'top') && (
+                    <div className="flex flex-col md:flex-row items-center gap-4 w-full lg:w-auto">
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving || isDeleting}
+                            className="glass-btn flex-1 md:min-w-[180px] h-16 flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 text-base shadow-xl"
+                        >
+                            {isSaving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                            {existingApps.find(a => a.nickname === nickname.trim()) ? '신청 정보 수정' : '신청 정보 제출'}
+                        </button>
+                        {!hideDelete && (
+                            <button
+                                onClick={() => {
+                                    if (!isAdmin) {
+                                        alert("관리자 권한이 필요합니다.\n(신청 내역 수정/삭제는 임원진에게 연락 부탁드리겠습니다)");
+                                        return;
+                                    }
+                                    handleDelete();
+                                }}
+                                className={cn(
+                                    "border-2 flex-1 md:min-w-[180px] h-16 rounded-[1.25rem] flex items-center justify-center gap-3 active:scale-95 text-base transition-all font-black shadow-sm",
+                                    isDeleting ? "opacity-50" : "",
+                                    isAdmin
+                                        ? "bg-white dark:bg-slate-800 border-red-50 dark:border-red-900/30 text-red-400 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-100 dark:hover:border-red-900/50"
+                                        : "bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed"
+                                )}
                             >
-                                {['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'].map(c => (
-                                    <option key={c} value={c}>{c}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="flex-1 lg:w-40">
-                            <label className="text-[10px] font-black text-slate-400 capitalize mb-2 block ml-1">Power</label>
-                            <input
-                                type="number"
-                                value={manualPower}
-                                onChange={(e) => setManualPower(e.target.value)}
-                                className="w-full h-16 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-3xl px-6 text-slate-700 dark:text-slate-200 font-black outline-none focus:border-indigo-200 dark:focus:border-indigo-500/50 shadow-sm"
-                            />
-                        </div>
+                                {isDeleting ? <Loader2 className="animate-spin" size={20} /> : <Trash2 size={20} />}
+                                {isAdmin ? '신청 정보 제거' : '신청 정보 제거'}
+                            </button>
+                        )}
                     </div>
                 )}
-
-                <div className="flex flex-col md:flex-row items-center gap-4 w-full lg:w-auto">
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving || isDeleting}
-                        className="glass-btn flex-1 md:min-w-[180px] h-16 flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 text-base shadow-xl"
-                    >
-                        {isSaving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                        {existingApps.find(a => a.nickname === nickname.trim()) ? '신청 정보 수정' : '신청 정보 제출'}
-                    </button>
-                    <button
-                        onClick={() => {
-                            if (!isAdmin) {
-                                alert("관리자 권한이 필요합니다.\n(신청 내역 수정/삭제는 임원진에게 연락 부탁드리겠습니다)");
-                                return;
-                            }
-                            handleDelete();
-                        }}
-                        className={cn(
-                            "border-2 flex-1 md:min-w-[180px] h-16 rounded-[1.25rem] flex items-center justify-center gap-3 active:scale-95 text-base transition-all font-black shadow-sm",
-                            isDeleting ? "opacity-50" : "",
-                            isAdmin
-                                ? "bg-white dark:bg-slate-800 border-red-50 dark:border-red-900/30 text-red-400 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-100 dark:hover:border-red-900/50"
-                                : "bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed"
-                        )}
-                    >
-                        {isDeleting ? <Loader2 className="animate-spin" size={20} /> : <Trash2 size={20} />}
-                        {isAdmin ? '신청 정보 제거' : '신청 정보 제거'}
-                    </button>
-                </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 pb-12">
-                <div className="glass-panel p-6 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/30 flex flex-col hover:scale-[1.02] transition-transform shadow-sm gap-5">
+            <div className={cn(
+                "grid gap-8 pb-12",
+                forceSingleColumn ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
+            )}>
+                <div className={cn(
+                    "glass-panel p-6 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/30 flex flex-col hover:scale-[1.02] transition-transform shadow-sm gap-5",
+                    forceSingleColumn ? "" : "" // No special desktop logic needed here
+                )}>
                     <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-2xl bg-white dark:bg-red-900/30 flex items-center justify-center border border-red-100 dark:border-red-900/50 shadow-sm shrink-0">
                             <AlertCircle className="text-red-500" size={20} />
@@ -461,6 +504,23 @@ export default function PartyApply({ testMode = false }: { testMode?: boolean })
                 {['수', '목', '금', '토', '일', '월', '화'].map(day => (
                     renderDayCard(day, ['토', '일'].includes(day))
                 ))}
+
+                {/* Bottom Save Button for Mobile flow */}
+                {saveButtonPosition === 'bottom' && (
+                    <div className={cn(
+                        "mt-6",
+                        forceSingleColumn ? "w-full" : "md:col-span-2 lg:col-span-4"
+                    )}>
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving || isDeleting}
+                            className="glass-btn w-full h-20 flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 text-xl font-black shadow-2xl rounded-[1.5rem]"
+                        >
+                            {isSaving ? <Loader2 className="animate-spin" size={24} /> : <Save size={24} />}
+                            {existingApps.find(a => a.nickname === nickname.trim()) ? '신청 정보 수정 완료' : '성역 신청 완료하기'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

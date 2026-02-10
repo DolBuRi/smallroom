@@ -16,6 +16,8 @@ export interface GuildMember {
     clearCount: string;
     score?: number;
     lastUpdated?: string;
+    specialNotes?: string;
+    joinDate?: string;
 }
 
 const SERVER_LIST = [
@@ -217,7 +219,9 @@ export default function MemberList() {
                             class: res.data.class,
                             guild: res.data.guild,
                             isActive: (res.data.guild === appSettings.guildName),
-                            lastUpdated: new Date().toISOString()
+                            lastUpdated: new Date().toISOString(),
+                            specialNotes: member.specialNotes || '',
+                            joinDate: member.joinDate || ''
                         };
                         successCount++;
                     }
@@ -288,7 +292,9 @@ export default function MemberList() {
                     class: res.data.class,
                     guild: res.data.guild,
                     isActive: (res.data.guild === appSettings.guildName),
-                    lastUpdated: new Date().toISOString()
+                    lastUpdated: new Date().toISOString(),
+                    specialNotes: m.specialNotes || '',
+                    joinDate: m.joinDate || ''
                 } : m);
 
                 updateMembers(updatedList);
@@ -372,7 +378,21 @@ export default function MemberList() {
 
     const getSortedMembers = () => {
         const rankPriority: Record<string, number> = { '군단장': 0, '엘리트 장교': 1, '군단병': 2 };
-        return [...members].sort((a, b) => {
+
+        // 1. 유효한 데이터만 필터링 (닉네임/ID가 있는 경우) 및 중복 제거
+        const uniqueMap = new Map<string, GuildMember>();
+        members.forEach(m => {
+            if (m && m.name && m.id) {
+                // 중복 닉네임이 있을 경우 최신 데이터(또는 첫 번째 데이터) 유지
+                if (!uniqueMap.has(m.id)) {
+                    uniqueMap.set(m.id, m);
+                }
+            }
+        });
+
+        const validMembers = Array.from(uniqueMap.values());
+
+        return validMembers.sort((a, b) => {
             const rankDiff = rankPriority[a.rank] - rankPriority[b.rank];
             if (rankDiff !== 0) return rankDiff;
             const powerDiff = b.power - a.power;
@@ -396,7 +416,7 @@ export default function MemberList() {
                     </h2>
                     <div className="flex items-center gap-4 mt-3 font-medium">
                         <div className="text-slate-500 dark:text-slate-300 text-sm flex items-center gap-2">
-                            총 {members.length}명의 멤버가 존재합니다.
+                            총 {sortedMembers.length}명의 멤버가 존재합니다.
                             <div className="group relative flex items-center">
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
@@ -527,10 +547,10 @@ export default function MemberList() {
                                     {isManageMode && (
                                         <th className="w-16 px-2 py-5 text-center">
                                             <div
-                                                onClick={() => setSelectedIds(selectedIds.length === members.length ? [] : members.map(m => m.id))}
+                                                onClick={() => setSelectedIds(selectedIds.length === sortedMembers.length ? [] : sortedMembers.map(m => m.id))}
                                                 className="w-6 h-6 mx-auto rounded-lg border-2 border-slate-300 dark:border-slate-600 hover:border-indigo-400 cursor-pointer flex items-center justify-center transition-all"
                                             >
-                                                {selectedIds.length === members.length && <Check size={14} className="text-indigo-500" strokeWidth={4} />}
+                                                {selectedIds.length > 0 && selectedIds.length === sortedMembers.length && <Check size={14} className="text-indigo-500" strokeWidth={4} />}
                                             </div>
                                         </th>
                                     )}
