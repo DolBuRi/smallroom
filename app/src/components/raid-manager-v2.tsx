@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
     Calendar, Users, Clock, CheckCircle, AlertCircle, Sparkles,
-    Zap, Info, Grid3X3, List as ListIcon, X, LayoutGrid, ClipboardList, Sword
+    Zap, Info, Grid3X3, List as ListIcon, X, LayoutGrid, ClipboardList, Sword, Link
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -130,10 +130,23 @@ const ClassIcon = ({ className }: { className: string }) => {
     );
 };
 
-import { Link } from 'lucide-react';
+const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip, fixedGroups = [], roster = [] }: { member: RaidApplication, compact?: boolean, onShowTooltip: (m: RaidApplication, r: DOMRect) => void, onHideTooltip: () => void, fixedGroups?: FixedGroup[], roster?: any[] }) => {
+    const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
 
-const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip, fixedGroups = [] }: { member: RaidApplication, compact?: boolean, onShowTooltip: (m: RaidApplication, r: DOMRect) => void, onHideTooltip: () => void, fixedGroups?: FixedGroup[] }) => {
-    const fixedGroup = member.fixedGroupId ? fixedGroups.find(g => g.id === member.fixedGroupId) : null;
+    // Find matching roster member
+    const rosterMember = roster.find(m => normalize(m.name) === normalize(member.nickname) || m.id === member.id);
+    const mId = rosterMember?.id;
+    const mName = rosterMember?.name || member.nickname;
+
+    // Find if in any group
+    const fixedGroup = fixedGroups.find(g => {
+        const ids = Array.isArray(g.memberIds) ? g.memberIds : (g.memberIds ? Object.values(g.memberIds) : []);
+        return ids.some((id: any) => {
+            const sid = normalize(id);
+            if (!sid) return false;
+            return sid === normalize(mId) || sid === normalize(mName) || sid === normalize(member.id) || sid === normalize(member.nickname);
+        });
+    });
 
     return (
         <div
@@ -147,28 +160,53 @@ const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip, fix
             <div className="flex items-center gap-3">
                 <ClassIcon className={member.class} />
                 <div className="flex flex-col">
-                    <div className="flex items-center gap-1.5">
-                        <span className={cn("font-bold text-slate-700 dark:text-slate-200 leading-none", compact ? "text-xs" : "text-sm")}>
-                            {member.nickname}
-                        </span>
-                        {fixedGroup && (
-                            <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
-                        )}
-                    </div>
+                    <span className={cn("font-bold text-slate-700 dark:text-slate-200 leading-none truncate", compact ? "text-xs" : "text-sm")}>
+                        {member.nickname}
+                    </span>
                     {!compact && <span className="text-[10px] text-slate-400 mt-0.5">{member.class}</span>}
                 </div>
             </div>
-            <div className="text-right">
-                <span className={cn("font-black text-slate-900 dark:text-slate-100", compact ? "text-xs" : "text-sm")}>
-                    {member.power.toLocaleString()}
-                </span>
-                {!compact && <span className="text-[10px] text-slate-400 block -mt-0.5">전투력</span>}
+
+            <div className="flex items-center gap-2">
+                {fixedGroup && (
+                    <span title={fixedGroup.name}>
+                        <Link size={10} className={cn("rotate-45 shrink-0", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
+                    </span>
+                )}
+                <div className="text-right">
+                    <span className={cn("font-black text-slate-900 dark:text-slate-100", compact ? "text-xs" : "text-sm")}>
+                        {member.power.toLocaleString()}
+                    </span>
+                    {!compact && <span className="text-[10px] text-slate-400 block -mt-0.5">전투력</span>}
+                </div>
             </div>
         </div>
     );
 };
 
-function MemberDetailTooltip({ member, rect, fixedGroups = [] }: { member: RaidApplication, rect: DOMRect, fixedGroups?: FixedGroup[] }) {
+function MemberDetailTooltip({ member, rect, fixedGroups = [], roster = [], isAdmin = false }: { member: RaidApplication, rect: DOMRect, fixedGroups?: FixedGroup[], roster?: any[], isAdmin?: boolean }) {
+    const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
+
+    // Find matching roster member
+    const rosterMember = roster.find(m => normalize(m.name) === normalize(member.nickname) || m.id === member.id);
+    const mId = rosterMember?.id;
+    const mName = rosterMember?.name || member.nickname;
+
+    // Find if in any group
+    const fixedGroup = fixedGroups.find(g => {
+        const ids = Array.isArray(g.memberIds) ? g.memberIds : (g.memberIds ? Object.values(g.memberIds) : []);
+        return ids.some((id: any) => {
+            const sid = normalize(id);
+            if (!sid) return false;
+            return sid === normalize(mId) || sid === normalize(mName) || sid === normalize(member.id) || sid === normalize(member.nickname);
+        });
+    });
+
+    const groupMembers = fixedGroup ? roster.filter(m => {
+        const ids = Array.isArray(fixedGroup.memberIds) ? fixedGroup.memberIds : (fixedGroup.memberIds ? Object.values(fixedGroup.memberIds) : []);
+        return ids.some(id => normalize(id) === normalize(m.id) || normalize(id) === normalize(m.name));
+    }) : [];
+
     const tooltipWidth = 280;
     let top = rect.top;
     let left = rect.right + 10;
@@ -180,7 +218,7 @@ function MemberDetailTooltip({ member, rect, fixedGroups = [] }: { member: RaidA
         left = Math.max(10, left);
 
         // Adjust top to prevent bottom overflow
-        const estimatedMaxHeight = 400;
+        const estimatedMaxHeight = 450;
         if (top + estimatedMaxHeight > window.innerHeight - 20) {
             top = window.innerHeight - estimatedMaxHeight - 20;
         }
@@ -205,63 +243,73 @@ function MemberDetailTooltip({ member, rect, fixedGroups = [] }: { member: RaidA
                         {member.class[0]}
                     </div>
                     <div>
-                        <h3 className="font-bold text-slate-900 dark:text-white">{member.nickname}</h3>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span>{member.class}</span>
-                            <span>•</span>
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+                        <h3 className="font-bold text-slate-900 dark:text-white leading-tight">{member.nickname}</h3>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                            <span className="text-indigo-600 dark:text-indigo-400">{member.class}</span>
+                            <span className="opacity-30">•</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{member.power.toLocaleString()} 전투력</span>
                         </div>
                     </div>
                 </div>
 
-                <div>
-                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
-                    <div className="space-y-2">
-                        {DAYS.map(day => {
-                            const slots = member.availability?.[day] || [];
-                            if (slots.length === 0) return null;
+                <div className="space-y-4">
+                    <section>
+                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                        <div className="space-y-1.5">
+                            {DAYS.map(day => {
+                                const slots = member.availability?.[day] || [];
+                                if (slots.length === 0) return null;
 
-                            const sortedSlots = [...slots].sort((a, b) => {
-                                const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
-                                const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
-                                return sortA - sortB;
-                            });
+                                const sortedSlots = [...slots].sort((a, b) => {
+                                    const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
+                                    const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
+                                    return sortA - sortB;
+                                });
 
-                            return (
-                                <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
-                                    <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
-                                    <div className="flex flex-wrap gap-1 flex-1">
-                                        {sortedSlots.map(t => {
-                                            const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
-                                            return (
-                                                <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
-                                                    {sLabel}
-                                                </span>
-                                            );
-                                        })}
+                                return (
+                                    <div key={day} className="flex items-center text-xs">
+                                        <span className="w-6 font-bold text-slate-500 dark:text-slate-400">{day}</span>
+                                        <div className="flex flex-wrap gap-1 flex-1 px-2 py-0.5">
+                                            {sortedSlots.map(t => {
+                                                const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label.replace(' 00:30', '') || t;
+                                                return (
+                                                    <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50/50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-bold border border-indigo-100 dark:border-indigo-800">
+                                                        {sLabel}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
-                        {!DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
-                            <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
-                        )}
-                    </div>
-                </div>
-
-                {member.fixedGroupId && (
-                    <div className="mt-4">
-                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">고정 파티 정보</h4>
-                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 border border-slate-100 dark:border-slate-800">
-                            <div className="flex items-center gap-2">
-                                <Link size={12} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroups.find(g => g.id === member.fixedGroupId)?.color || ''] || 'text-slate-400')} strokeWidth={3} />
-                                <span className="font-bold text-slate-700 dark:text-slate-200 text-sm">
-                                    {fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '알 수 없는 그룹'}
-                                </span>
-                            </div>
+                                );
+                            })}
+                            {!DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                                <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
+                            )}
                         </div>
-                    </div>
-                )}
+                    </section>
+
+                    {fixedGroup && (
+                        <section className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">고정 파티 ({fixedGroup.name})</h4>
+                                <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
+                            </div>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 space-y-2">
+                                {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                                    <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
+                                            <span className="font-bold text-slate-700 dark:text-slate-300">{gm.name}</span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-400 font-medium">{gm.class}</span>
+                                    </div>
+                                )) : (
+                                    <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                                )}
+                            </div>
+                        </section>
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -335,13 +383,14 @@ const HeatmapCell = ({
     );
 };
 
-function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGroups = [] }: {
+function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGroups = [], roster = [] }: {
     day: string,
     apps: RaidApplication[],
     rect: DOMRect,
     onMouseEnter: () => void,
     onMouseLeave: () => void,
-    fixedGroups?: FixedGroup[]
+    fixedGroups?: FixedGroup[],
+    roster?: any[]
 }) {
     const tooltipWidth = 220;
 
@@ -396,7 +445,21 @@ function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGrou
                 </div>
                 <div className="space-y-1 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
                     {apps.map(app => {
-                        const fixedGroup = app.fixedGroupId ? fixedGroups.find(g => g.id === app.fixedGroupId) : null;
+                        const fuzzy = (s: any) => String(s || '').trim().replace(/\s/g, '');
+                        const rosterMember = roster.find(m => fuzzy(m.name) === fuzzy(app.nickname) || m.id === app.id);
+                        const mId = rosterMember?.id;
+                        const mName = rosterMember?.name || app.nickname;
+
+                        const group = fixedGroups.find(g => {
+                            const ids = Array.isArray(g.memberIds) ? g.memberIds : (g.memberIds ? Object.values(g.memberIds) : []);
+                            return ids.some((id: any) => {
+                                const sid = fuzzy(id);
+                                if (!sid) return false;
+                                return sid === fuzzy(mId) || sid === fuzzy(mName) || sid === fuzzy(app.id) || sid === fuzzy(app.nickname);
+                            });
+                        });
+                        const fixedGroup = group || (app.fixedGroupId ? fixedGroups.find(g => g.id === app.fixedGroupId) : null);
+
                         return (
                             <div
                                 key={app.id}
@@ -426,6 +489,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     const { isAdmin } = useAuth();
     const [applications, setApplications] = useState<RaidApplication[]>([]);
     const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
+    const [roster, setRoster] = useState<any[]>([]);
 
     // Detailed View State
     const [selectedDay, setSelectedDay] = useState<string>('전체');
@@ -460,7 +524,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     // Initial Data Sync
     useEffect(() => {
         if (testMode) {
-            // Generate Mock Data for Test Mode
+            // ... (Mock data logic preserved)
             const classes = ['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
             const mockApps: RaidApplication[] = Array.from({ length: 80 }, (_, i) => {
                 const cls = classes[Math.floor(Math.random() * classes.length)];
@@ -468,7 +532,6 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 const slots週末 = ['we1', 'we2', 'we3', 'we4', 'we5'];
                 const availability: Record<string, string[]> = { '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': [] };
 
-                // Random availability
                 if (Math.random() > 0.3) {
                     ['월', '화', '수', '목', '금'].forEach(d => {
                         if (Math.random() > 0.45) availability[d] = ['wd2', 'wd3'];
@@ -502,37 +565,16 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
             setFixedGroups(data ? Object.values(data) : []);
         });
 
-        // 2. Combined Listener for Members (Roster) and Raid Applications
-        // We need the roster to map nickname -> fixedGroupId
-        let currentRoster: any[] = [];
-
-        const membersRef = ref(db, 'members');
-        const unsubscribeMembers = onValue(membersRef, (snap) => {
+        // 2. Load Members (Roster)
+        const unsubscribeMembers = onValue(ref(db, 'members'), (snap) => {
             const data = snap.val();
-            currentRoster = data ? Object.values(data) : [];
-            // Trigger refresh of applications with new roster info if apps already exist
-            setApplications(prev => prev.map(app => {
-                const rosterMember = currentRoster.find(m => m.name === app.nickname);
-                return { ...app, fixedGroupId: rosterMember?.fixedGroupId };
-            }));
+            setRoster(data ? Object.values(data) : []);
         });
 
-        const appsRef = ref(db, 'raid_applications');
-        const unsubscribeApps = onValue(appsRef, (snapshot) => {
+        // 3. Load Applications
+        const unsubscribeApps = onValue(ref(db, 'raid_applications'), (snapshot) => {
             const data = snapshot.val();
-            if (data) {
-                const appsList = Object.values(data) as any[];
-                const enriched = appsList.map(app => {
-                    const rosterMember = currentRoster.find(m => m.name === app.nickname);
-                    return {
-                        ...app,
-                        fixedGroupId: rosterMember?.fixedGroupId
-                    };
-                });
-                setApplications(enriched);
-            } else {
-                setApplications([]);
-            }
+            setApplications(data ? Object.values(data) as RaidApplication[] : []);
         });
 
         return () => {
@@ -582,15 +624,39 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
         }
     };
 
+    // --- DATA ENRICHMENT ---
+    const enrichedApplications = useMemo(() => {
+        const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
+        return applications.map(app => {
+            const rosterMember = roster.find(m => normalize(m.name) === normalize(app.nickname) || m.id === app.id);
+            const mId = rosterMember?.id;
+            const mName = rosterMember?.name || app.nickname;
+
+            const group = fixedGroups.find(g => {
+                const ids = Array.isArray(g.memberIds) ? g.memberIds : (g.memberIds ? Object.values(g.memberIds) : []);
+                return ids.some((id: any) => {
+                    const sid = normalize(id);
+                    if (!sid) return false;
+                    return sid === normalize(mId) || sid === normalize(mName) || sid === normalize(app.id) || sid === normalize(app.nickname);
+                });
+            });
+
+            return {
+                ...app,
+                fixedGroupId: group?.id || app.fixedGroupId
+            };
+        });
+    }, [applications, fixedGroups, roster]);
+
     // Derived Data for Detailed View
     const dayApplicants = useMemo(() => {
         if (selectedDay === '전체') {
-            return applications.sort((a, b) => b.power - a.power);
+            return enrichedApplications.sort((a, b) => b.power - a.power);
         }
-        return applications
+        return enrichedApplications
             .filter(app => app.availability?.[selectedDay]?.length > 0)
             .sort((a, b) => b.power - a.power);
-    }, [applications, selectedDay]);
+    }, [enrichedApplications, selectedDay]);
 
     return (
         <div className="space-y-6 pb-20 animate-in fade-in duration-500">
@@ -601,6 +667,9 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                         <Grid3X3 className="text-indigo-500 dark:text-indigo-400" size={32} />
                         성역 신청 현황
                         {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse">TEST MODE</span>}
+                        <span className="text-[10px] text-slate-300 font-bold bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
+                            G:{fixedGroups.length} / R:{roster.length}
+                        </span>
                     </h2>
                     <div className="mt-[17px]">
                         <p className="text-slate-500 dark:text-slate-300 text-sm font-medium flex items-center gap-2">
@@ -713,7 +782,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
 
                                     // Get Apps for this slot
                                     const slotApps = slotId
-                                        ? applications.filter(app => app.availability?.[day]?.includes(slotId!))
+                                        ? enrichedApplications.filter(app => app.availability?.[day]?.includes(slotId!))
                                         : [];
 
                                     return (
@@ -820,6 +889,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                                                         onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
                                                                         onHideTooltip={() => setTooltipInfo(null)}
                                                                         fixedGroups={fixedGroups}
+                                                                        roster={roster}
                                                                     />
                                                                 ))}
                                                             </div>
@@ -849,6 +919,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                                     onShowTooltip={(m, r) => setTooltipInfo({ member: m, rect: r })}
                                     onHideTooltip={() => setTooltipInfo(null)}
                                     fixedGroups={fixedGroups}
+                                    roster={roster}
                                 />
                             ))}
                             {dayApplicants.length === 0 && (
@@ -872,6 +943,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     }}
                     onMouseLeave={hideHeatmapTooltip}
                     fixedGroups={fixedGroups}
+                    roster={roster}
                 />
             )}
 
@@ -880,7 +952,28 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     member={tooltipInfo.member}
                     rect={tooltipInfo.rect}
                     fixedGroups={fixedGroups}
+                    roster={roster}
+                    isAdmin={isAdmin}
                 />
+            )}
+
+            {isAdmin && (
+                <div className="fixed bottom-4 right-4 bg-slate-900/80 backdrop-blur-md text-slate-400 p-2.5 rounded-xl z-[100] text-[10px] font-bold border border-slate-700/50 flex gap-3 shadow-2xl pointer-events-none">
+                    <div className="flex flex-col">
+                        <span className="text-[8px] uppercase opacity-50">Applications</span>
+                        <span className="text-indigo-400">{applications.length}</span>
+                    </div>
+                    <div className="w-px h-6 bg-slate-700/50" />
+                    <div className="flex flex-col">
+                        <span className="text-[8px] uppercase opacity-50">Fixed Groups</span>
+                        <span className="text-emerald-400">{fixedGroups.length}</span>
+                    </div>
+                    <div className="w-px h-6 bg-slate-700/50" />
+                    <div className="flex flex-col">
+                        <span className="text-[8px] uppercase opacity-50">Roster</span>
+                        <span className="text-amber-400">{roster.length}</span>
+                    </div>
+                </div>
             )}
         </div>
     );

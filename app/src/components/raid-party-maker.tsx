@@ -372,7 +372,7 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
 
     return (
         <div className={cn(
-            "relative p-2 rounded-xl border flex items-center gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border overflow-hidden",
+            "relative p-2 rounded-xl border flex items-center justify-between gap-3 bg-white dark:bg-slate-800 transition-all select-none box-border overflow-hidden",
             isOverlay ? "shadow-2xl ring-4 ring-indigo-500/20 scale-105 z-50 cursor-grabbing border-indigo-500" : "shadow-sm",
             isConflict
                 ? "border-rose-400 bg-rose-50/50 dark:bg-rose-900/10 dark:border-rose-800 shadow-rose-100/50"
@@ -385,31 +385,30 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
                 </div>
             )}
 
-            <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shadow-inner", getClassColor(member.class))}>
-                <span className="text-white font-bold">{member.class[0]}</span>
+            <div className="flex items-center gap-3">
+                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm text-white shadow-inner", getClassColor(member.class))}>
+                    {member.class[0]}
+                </div>
+                <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate leading-none">{member.name}</span>
+                    <span className="text-[10px] text-slate-400 mt-1">{member.class}</span>
+                </div>
             </div>
 
-            <div className="flex-1 min-w-0">
-                <div className="flex items-baseline justify-between">
-                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm truncate">{member.name}</span>
-                    <div className="flex items-center gap-1.5">
-                        {fixedGroup && (
-                            <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
-                        )}
-                        <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
-                            {member.power.toLocaleString()}
-                        </span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-400">{member.class}</span>
-                </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+                {fixedGroup && (
+                    <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
+                )}
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                    {member.power.toLocaleString()}
+                </span>
             </div>
         </div>
     );
 }
 
 function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDay, assignedTime }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[], assignedDay?: string, assignedTime?: string }) {
+    const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
     const tooltipWidth = 280;
     let top = rect.top;
     let left = rect.right + 10;
@@ -439,7 +438,7 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
     };
 
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
-    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.includes(m.id) || fixedGroup.memberIds.includes(m.name)) && m.id !== member.id) : [];
+    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.some(id => normalize(id) === normalize(m.id) || normalize(id) === normalize(m.name))) && m.id !== member.id) : [];
 
     const isConflict = assignedDay && assignedTime && (!member.availability?.[assignedDay]?.includes(assignedTime));
     const slotLabel = assignedTime ? ([...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === assignedTime)?.label || assignedTime) : '';
@@ -460,71 +459,73 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
                         {member.class[0]}
                     </div>
                     <div>
-                        <h3 className="font-bold text-slate-900 dark:text-white">{member.name}</h3>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span>{member.class}</span>
-                            <span>•</span>
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{member.power.toLocaleString()} 전투력</span>
+                        <h3 className="font-bold text-slate-900 dark:text-white leading-tight">{member.name}</h3>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                            <span className="text-indigo-600 dark:text-indigo-400">{member.class}</span>
+                            <span className="opacity-30">•</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{member.power.toLocaleString()} 전투력</span>
                         </div>
                     </div>
                 </div>
 
-                <div className="mb-4">
-                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
-                    <div className="space-y-2">
-                        {RAID_DAYS.map(day => {
-                            const slots = member.availability?.[day] || [];
-                            if (slots.length === 0) return null;
+                <div className="space-y-4">
+                    <section>
+                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">참여 가능 시간</h4>
+                        <div className="space-y-1.5">
+                            {RAID_DAYS.map(day => {
+                                const slots = member.availability?.[day] || [];
+                                if (slots.length === 0) return null;
 
-                            const sortedSlots = [...slots].sort((a, b) => {
-                                const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
-                                const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
-                                return sortA - sortB;
-                            });
+                                const sortedSlots = [...slots].sort((a, b) => {
+                                    const sortA = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === a)?.sortKey || 0;
+                                    const sortB = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === b)?.sortKey || 0;
+                                    return sortA - sortB;
+                                });
 
-                            return (
-                                <div key={day} className="flex items-start text-xs border-b border-slate-50 dark:border-slate-700/50 pb-1.5 last:border-0 last:pb-0">
-                                    <span className="w-6 font-bold text-slate-500 dark:text-slate-400 flex-shrink-0 mt-0.5">{day}</span>
-                                    <div className="flex flex-wrap gap-1 flex-1">
-                                        {sortedSlots.map(t => {
-                                            const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
-                                            return (
-                                                <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-medium border border-indigo-100 dark:border-indigo-800">
-                                                    {sLabel}
-                                                </span>
-                                            );
-                                        })}
+                                return (
+                                    <div key={day} className="flex items-center text-xs">
+                                        <span className="w-6 font-bold text-slate-500 dark:text-slate-400 shrink-0">{day}</span>
+                                        <div className="flex flex-wrap gap-1 flex-1 px-2 py-0.5">
+                                            {sortedSlots.map(t => {
+                                                const sLabel = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === t)?.label || t;
+                                                return (
+                                                    <span key={`${day}-${t}`} className="px-1.5 py-0.5 bg-indigo-50/50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 rounded text-[10px] font-bold border border-indigo-100 dark:border-indigo-800">
+                                                        {sLabel}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
-                        {!RAID_DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
-                            <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
-                        )}
-                    </div>
-                </div>
-
-                {fixedGroup && (
-                    <div>
-                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                            <span>고정 파티 ({fixedGroup.name})</span>
-                            <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
-                        </h4>
-                        <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2">
-                            {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
-                                <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
-                                    <div className="flex items-center gap-2">
-                                        <span className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
-                                        <span className="text-slate-600 dark:text-slate-300 font-medium">{gm.name}</span>
-                                    </div>
-                                    <span className="text-slate-400 text-[10px]">{gm.class}</span>
-                                </div>
-                            )) : (
-                                <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                                );
+                            })}
+                            {!RAID_DAYS.some(d => (member.availability?.[d]?.length || 0) > 0) && (
+                                <p className="text-xs text-slate-400 text-center py-2">신청한 시간이 없습니다.</p>
                             )}
                         </div>
-                    </div>
-                )}
+                    </section>
+
+                    {fixedGroup && (
+                        <section className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">고정 파티 ({fixedGroup.name})</h4>
+                                <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
+                            </div>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 space-y-2">
+                                {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                                    <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
+                                            <span className="font-bold text-slate-700 dark:text-slate-300">{gm.name}</span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-400 font-medium">{gm.class}</span>
+                                    </div>
+                                )) : (
+                                    <p className="text-[10px] text-slate-400 text-center py-2">다른 멤버 없음</p>
+                                )}
+                            </div>
+                        </section>
+                    )}
+                </div>
             </div>
         </div>
     );
