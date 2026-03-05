@@ -3,6 +3,7 @@
 import React from 'react';
 import PartyApply from '@/components/party-apply';
 import { Sword } from 'lucide-react';
+import { getCurrentWeek } from '@/lib/utils';
 
 export default function MobileApplyPage() {
     const [isMounted, setIsMounted] = React.useState(false);
@@ -35,7 +36,7 @@ export default function MobileApplyPage() {
                                 성역 파티 신청
                             </h1>
                             <p className="text-sm font-bold text-slate-400 tracking-tight">
-                                (2월 2주차)
+                                {`(${getCurrentWeek()})`}
                             </p>
                         </div>
                     </div>

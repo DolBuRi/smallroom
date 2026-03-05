@@ -16,6 +16,7 @@ interface AlerterSettings {
     };
     alarmOffsets: number[];
     shugoAlarmOffsets: number[];
+    invasionAlarmOffsets?: number[];
     bossNahmaAlarmOffsets?: number[]; // [FIX] Added missing offset key from original site
     lastSync?: string;
 }
@@ -33,6 +34,8 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
     const [nextAlarm, setNextAlarm] = useState<string>('계산 중...');
     const [showLocalDebug, setShowLocalDebug] = useState(showDiagnostics);
     const [virtualTimeOffset, setVirtualTimeOffset] = useState(0);
+    const [manualClockOffset, setManualClockOffset] = useState(0); // For clock sync (persisted)
+    const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
     // Sync prop changes to local state
     useEffect(() => {
@@ -223,33 +226,58 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
 
     // Alarm Engine Loop
     useEffect(() => {
-        if (!settings || !isConnected) return;
-
         const checkAlarms = () => {
-            // [Simulation Mode] Use Virtual Time if offset exists
-            const now = new Date(Date.now() + virtualTimeOffset);
+            const nowReal = new Date();
+            // Total effective time = Actual Time + Fixed Manual Offset + Temporary Simulation Offset
+            const effectiveOffset = (manualClockOffset * 1000) + virtualTimeOffset;
+            const now = new Date(nowReal.getTime() + effectiveOffset);
+            setCurrentTime(now);
+
+            if (!settings || !isConnected) {
+                setNextAlarm('연동 대기 중...');
+                return;
+            }
+
             const currentInfos: any[] = [];
-
-            // Safe settings reference (guarded by useEffect's early return)
             const currentSettings = settings!;
-
             let minDiff = Infinity;
             let nextStatus = '금일 남은 알람 없음';
 
             // Helper to trigger
-            const triggerAlarmHelper = (key: string, label: string, diffMins: number, type: string) => {
-                if (!triggeredAlarmsRef.current.has(key)) {
-                    const text = diffMins === 0
-                        ? `${label} 시작 시간입니다!`
-                        : `${label}, ${diffMins}분 전입니다.`;
+            const triggerAlarmHelper = (keyBase: string, label: string, diffMins: number, type: string, offsets: number[]) => {
+                // 1. Exact match check (Standard)
+                if (offsets.includes(diffMins)) {
+                    const key = `${keyBase}-${diffMins}`;
+                    if (!triggeredAlarmsRef.current.has(key)) {
+                        const text = diffMins === 0
+                            ? `${label} 시작 시간입니다!`
+                            : `${label}, ${diffMins}분 전입니다.`;
+                        triggerAlarm(text, type, diffMins);
+                        triggeredAlarmsRef.current.add(key);
+                    }
+                }
 
-                    // Trigger Audio
-                    triggerAlarm(text, type, diffMins); // Use triggerAlarm wrapper to handle Notification too
-                    triggeredAlarmsRef.current.add(key);
+                // 2. Catch-up check for 'Start' alarm (diffMins 0)
+                // If we are between 0 and -2 minutes and haven't triggered the '0' alarm yet
+                if (diffMins <= 0 && diffMins > -2 && offsets.includes(0)) {
+                    const catchUpKey = `${keyBase}-0`;
+                    if (!triggeredAlarmsRef.current.has(catchUpKey)) {
+                        triggerAlarm(`${label} 오프닝을 놓쳤을 수 있습니다. 현재 진행 중입니다!`, type, 0);
+                        triggeredAlarmsRef.current.add(catchUpKey);
+                    }
                 }
             };
 
-            // --- 1. Rift Logic (Specified Hours) ---
+            // Range-based check (fires if diffMins matches an offset EXACTLY, but works with Math.ceil)
+            // Math.ceil(diffMs / 60000) results in:
+            // 5.001 -> 6
+            // 5.000 -> 5
+            // 4.001 -> 5
+            // 4.000 -> 4
+            // So if offset is 5, it fires when diffMs is between 4*60000+1 and 5*60000.
+            // This is exactly a 1-minute window.
+
+            // --- 1. Rift Logic ---
             if (currentSettings.alarmStatus.rift) {
                 RIFT_TIMES.forEach(hour => {
                     const target = new Date(now);
@@ -262,109 +290,85 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
                     const diffMs = target.getTime() - now.getTime();
                     const diffMins = Math.ceil(diffMs / 60000);
 
-                    if (diffMins >= -5 && diffMins < 1440) {
-                        currentInfos.push({ type: 'rift', hour: hour, diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: currentSettings.alarmOffsets });
-
+                    if (diffMins >= -10 && diffMins < 1440) {
+                        currentInfos.push({ type: 'rift', hour, diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: currentSettings.alarmOffsets });
                         if (diffMins > 0 && diffMins < minDiff) {
                             minDiff = diffMins;
                             nextStatus = `시공 ${hour}시 (${diffMins}분 전)`;
                         }
-
-                        if (currentSettings.alarmOffsets.includes(diffMins)) {
-                            const key = `rift-${target.getTime()}-${diffMins}`;
-                            triggerAlarmHelper(key, '시공의 균열', diffMins, 'rift');
-                        }
+                        triggerAlarmHelper(`rift-${target.getTime()}`, '시공의 균열', diffMins, 'rift', currentSettings.alarmOffsets);
                     }
                 });
             }
 
-            // --- 2. Shugo Logic (Every Hour xx:15, xx:45) ---
+            // --- 2. Shugo Logic ---
             if (currentSettings.alarmStatus.shugo) {
                 SHUGO_MINUTES.forEach(min => {
                     const target = new Date(now);
                     target.setMinutes(min, 0, 0);
-
-                    if (target.getTime() <= now.getTime()) {
-                        target.setHours(target.getHours() + 1);
-                    }
+                    if (target.getTime() <= now.getTime()) target.setHours(target.getHours() + 1);
 
                     const diffMs = target.getTime() - now.getTime();
                     const diffMins = Math.ceil(diffMs / 60000);
 
                     currentInfos.push({ type: 'shugo', hour: target.getHours(), diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: currentSettings.shugoAlarmOffsets });
-
                     if (diffMins > 0 && diffMins < minDiff) {
                         minDiff = diffMins;
                         nextStatus = `슈고 ${target.getHours()}:${min} (${diffMins}분 전)`;
                     }
-
-                    if (currentSettings.shugoAlarmOffsets.includes(diffMins)) {
-                        const key = `shugo-${target.getTime()}-${diffMins}`;
-                        triggerAlarmHelper(key, '슈고 페스타', diffMins, 'shugo');
-                    }
+                    triggerAlarmHelper(`shugo-${target.getTime()}`, '슈고 페스타', diffMins, 'shugo', currentSettings.shugoAlarmOffsets);
                 });
             }
 
-            // --- 3. Invasion Logic (Every Hour xx:00) ---
+            // --- 3. Invasion Logic ---
             if (currentSettings.alarmStatus.invasion) {
                 const target = new Date(now);
                 target.setMinutes(0, 0, 0);
-
-                if (target.getTime() <= now.getTime()) {
-                    target.setHours(target.getHours() + 1);
-                }
+                if (target.getTime() <= now.getTime()) target.setHours(target.getHours() + 1);
 
                 const diffMs = target.getTime() - now.getTime();
                 const diffMins = Math.ceil(diffMs / 60000);
-
                 const invOffsets = (currentSettings as any).invasionAlarmOffsets || currentSettings.alarmOffsets || [0, 5];
 
                 currentInfos.push({ type: 'invasion', hour: target.getHours(), diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: invOffsets });
-
                 if (diffMins > 0 && diffMins < minDiff) {
                     minDiff = diffMins;
                     nextStatus = `침공 ${target.getHours()}시 (${diffMins}분 전)`;
                 }
-
-                if (invOffsets.includes(diffMins)) {
-                    const key = `invasion-${target.getTime()}-${diffMins}`;
-                    triggerAlarmHelper(key, '차원 침공', diffMins, 'invasion');
-                }
+                triggerAlarmHelper(`invasion-${target.getTime()}`, '차원 침공', diffMins, 'invasion', invOffsets);
             }
 
-            // --- 4. Nahma (Sat/Sun 20:00) ---
+            // --- 4. Nahma ---
             if (currentSettings.alarmStatus.nahma) {
                 const target = new Date(now);
+                if (isNaN(target.getTime())) return;
+
                 target.setHours(20, 0, 0, 0);
-                const day = target.getDay();
+                // Find next occurrance even if not today (Safety limit: 14 days)
+                let safety = 0;
+                while ((![0, 6].includes(target.getDay()) || target.getTime() < now.getTime()) && safety < 14) {
+                    target.setDate(target.getDate() + 1);
+                    safety++;
+                }
 
-                if (day === 0 || day === 6) {
-                    const diffMs = target.getTime() - now.getTime();
-                    const diffMins = Math.ceil(diffMs / 60000);
-                    const nahmaOffsets = currentSettings.bossNahmaAlarmOffsets || [0, 5];
+                const diffMs = target.getTime() - now.getTime();
+                const diffMins = Math.ceil(diffMs / 60000);
+                const nahmaOffsets = currentSettings.bossNahmaAlarmOffsets || [0, 5];
 
-                    if (diffMins > -10 && diffMins < 180) {
-                        currentInfos.push({ type: 'nahma', hour: 20, diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: nahmaOffsets });
-
-                        if (diffMins > 0 && diffMins < minDiff) {
-                            minDiff = diffMins;
-                            nextStatus = `나흐마 20시 (${diffMins}분 전)`;
-                        }
-
-                        if (nahmaOffsets.includes(diffMins)) {
-                            const key = `nahma-${target.getTime()}-${diffMins}`;
-                            triggerAlarmHelper(key, '나흐마 등장', diffMins, 'nahma');
-                        }
+                if (diffMins < 10080) { // Within a week
+                    currentInfos.push({ type: 'nahma', hour: 20, diffMins, isEnabled: true, targetTime: target.toLocaleTimeString(), offsets: nahmaOffsets });
+                    if (diffMins > 0 && diffMins < minDiff) {
+                        minDiff = diffMins;
+                        const dayName = target.getDay() === 0 ? '일' : '토';
+                        nextStatus = `나흐마 ${dayName} 20시 (${diffMins}분 전)`;
                     }
+                    triggerAlarmHelper(`nahma-${target.getTime()}`, '나흐마 등장', diffMins, 'nahma', nahmaOffsets);
                 }
             }
 
-            setNextAlarm(prev => prev !== nextStatus ? nextStatus : prev);
+            setNextAlarm(nextStatus);
             setDebugInfo(currentInfos.sort((a, b) => a.diffMins - b.diffMins));
         };
-
-        // Run immediately to handle simulation clicks instantly
-        checkAlarms();
 
         const interval = setInterval(checkAlarms, 1000);
         return () => clearInterval(interval);
@@ -395,6 +399,11 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
     useEffect(() => {
         const savedKey = localStorage.getItem('aion2_alerter_sync_key');
         const localSettings = localStorage.getItem('aion2_alerter_local_settings');
+        const savedClockOffset = localStorage.getItem('aion2_alerter_clock_offset');
+        if (savedClockOffset) {
+            const parsed = parseFloat(savedClockOffset);
+            if (!isNaN(parsed)) setManualClockOffset(parsed);
+        }
 
         if (savedKey) {
             setSyncKey(savedKey);
@@ -528,6 +537,7 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
 
             if (snapshot.exists()) {
                 const data = snapshot.val();
+                data.lastSync = new Date().toLocaleString('ko-KR');
                 // When syncing from cloud, we update local storage too (Reset)
                 updateSettings(data);
                 setIsConnected(true);
@@ -735,7 +745,7 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
                             </div>
 
                             <div className="text-[10px] text-slate-400 mb-2">
-                                Client: {new Date(Date.now() + virtualTimeOffset).toLocaleTimeString()}
+                                {virtualTimeOffset !== 0 ? 'VIRTUAL' : 'REAL'}: {currentTime.toLocaleTimeString()}
                             </div>
                             <table className="w-full text-left">
                                 <thead>
@@ -778,27 +788,97 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
                 <div className="space-y-6">
                     {isConnected && settings ? (
                         <div className="glass-panel p-8 animate-in slide-in-from-bottom-4 duration-500 border-indigo-100 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 relative shadow-xl shadow-indigo-100/20 dark:shadow-none backdrop-blur-xl">
-                            {/* Header */}
-                            <div className="flex items-center justify-between mb-8">
-                                <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-                                    <Signal size={20} className="text-green-500" />
-                                    통합 알람 제어
-                                </h3>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => triggerAlarm("현재 설정된 알람 방식 테스트 메시지입니다.", 'shugo', 5)}
-                                        className="px-4 py-2 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-bold text-xs shadow-sm hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all flex items-center gap-1.5"
-                                    >
-                                        <PlayCircle size={14} className="text-indigo-500 dark:text-indigo-400" />
-                                        알람 테스트
-                                    </button>
-                                    <button
-                                        onClick={() => handleSync(syncKey, false)}
-                                        className="px-4 py-2 rounded-lg bg-indigo-50 dark:bg-slate-700 border border-indigo-100 dark:border-slate-600 text-indigo-600 dark:text-indigo-400 font-bold text-xs shadow-sm hover:bg-indigo-100 dark:hover:bg-slate-600 active:scale-95 transition-all flex items-center gap-1.5"
-                                    >
-                                        <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
-                                        불러오기
-                                    </button>
+                            {/* Status Header */}
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-100 dark:border-slate-700">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center text-indigo-500 shadow-inner">
+                                        <Signal size={24} className={isLoading ? "animate-pulse" : ""} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                                            통합 알람 제어
+                                            {virtualTimeOffset !== 0 && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded animate-pulse">VIRTUAL</span>}
+                                        </h3>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-400">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                                현지 사이트 시간:
+                                            </span>
+                                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                                                {currentTime.toLocaleTimeString('ko-KR', { hour12: false })}
+                                            </span>
+                                            <div className="flex gap-1 ml-2">
+                                                <button
+                                                    onClick={() => {
+                                                        const newVal = manualClockOffset - 0.5;
+                                                        setManualClockOffset(newVal);
+                                                        localStorage.setItem('aion2_alerter_clock_offset', newVal.toString());
+                                                    }}
+                                                    className="w-8 h-5 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded text-[10px] font-bold text-slate-500 transition-colors"
+                                                    title="-0.5s"
+                                                >
+                                                    -0.5
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        const newVal = manualClockOffset + 0.5;
+                                                        setManualClockOffset(newVal);
+                                                        localStorage.setItem('aion2_alerter_clock_offset', newVal.toString());
+                                                    }}
+                                                    className="w-8 h-5 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded text-[10px] font-bold text-slate-500 transition-colors"
+                                                    title="+0.5s"
+                                                >
+                                                    +0.5
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setManualClockOffset(0);
+                                                        localStorage.removeItem('aion2_alerter_clock_offset');
+                                                    }}
+                                                    className="w-5 h-5 flex items-center justify-center bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 rounded text-indigo-500 transition-colors"
+                                                    title="Reset"
+                                                >
+                                                    <RefreshCw size={10} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {settings.lastSync && (
+                                            <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5 font-medium">
+                                                <div className="w-1 h-1 rounded-full bg-slate-300" />
+                                                최종 동기화: {settings.lastSync}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-2">
+                                    <div className="px-4 py-2 bg-indigo-500 rounded-xl shadow-lg shadow-indigo-200 dark:shadow-none flex items-center gap-3 group transition-all hover:scale-[1.02]">
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[9px] font-black text-white/70 uppercase tracking-tighter">Next Alarm</span>
+                                            <span className="text-xs font-black text-white truncate max-w-[150px]">
+                                                {nextAlarm}
+                                            </span>
+                                        </div>
+                                        <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                                            <Bell size={16} className="animate-bounce" />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => triggerAlarm("현재 설정된 알람 방식 테스트 메시지입니다.", 'shugo', 5)}
+                                            className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-bold text-[10px] shadow-sm hover:bg-slate-50 dark:hover:bg-slate-600 transition-all flex items-center gap-1"
+                                        >
+                                            <PlayCircle size={12} className="text-indigo-500" />
+                                            테스트
+                                        </button>
+                                        <button
+                                            onClick={() => handleSync()}
+                                            className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] shadow-sm hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-all flex items-center gap-1"
+                                        >
+                                            <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} />
+                                            동기화
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -906,18 +986,20 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
                                         <TreeItem
                                             label="침공"
                                             active={settings.alarmStatus?.invasion}
-                                            times={settings.alarmOffsets}
+                                            times={settings.invasionAlarmOffsets || settings.alarmOffsets}
                                         />
 
-                                        {/* Nahma Details - Fixed to 시작 시 */}
+                                        {/* Nahma Details */}
                                         <TreeItem
                                             label="나흐마"
                                             active={settings.alarmStatus?.nahma}
-                                            customContent={
+                                            times={settings.bossNahmaAlarmOffsets}
+                                            // Fallback to "시작 시" if no offsets
+                                            customContent={(!settings.bossNahmaAlarmOffsets || settings.bossNahmaAlarmOffsets.length === 0) ? (
                                                 <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-xs font-bold text-slate-600 dark:text-slate-300">
                                                     시작 시
                                                 </span>
-                                            }
+                                            ) : undefined}
                                         />
 
                                         {/* Custom Details */}

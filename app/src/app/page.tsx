@@ -133,7 +133,7 @@ export default function Home() {
             <h1 className="text-2xl font-black bg-gradient-to-r from-indigo-500 to-indigo-700 bg-clip-text text-transparent tracking-tight">
               AION2 <br />GUILD MANAGER
             </h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 px-1">아이온2 길드 관리 매니저 v1.2</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 px-1">아이온2 길드 관리 매니저 v1.3</p>
           </div>
 
           <nav className="flex-1 px-4 space-y-2">

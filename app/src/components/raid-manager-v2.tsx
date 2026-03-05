@@ -667,9 +667,6 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                         <Grid3X3 className="text-indigo-500 dark:text-indigo-400" size={32} />
                         성역 신청 현황
                         {testMode && <span className="text-xs bg-red-500 text-white px-2 py-1 rounded-full animate-pulse">TEST MODE</span>}
-                        <span className="text-[10px] text-slate-300 font-bold bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
-                            G:{fixedGroups.length} / R:{roster.length}
-                        </span>
                     </h2>
                     <div className="mt-[17px]">
                         <p className="text-slate-500 dark:text-slate-300 text-sm font-medium flex items-center gap-2">
@@ -957,24 +954,6 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 />
             )}
 
-            {isAdmin && (
-                <div className="fixed bottom-4 right-4 bg-slate-900/80 backdrop-blur-md text-slate-400 p-2.5 rounded-xl z-[100] text-[10px] font-bold border border-slate-700/50 flex gap-3 shadow-2xl pointer-events-none">
-                    <div className="flex flex-col">
-                        <span className="text-[8px] uppercase opacity-50">Applications</span>
-                        <span className="text-indigo-400">{applications.length}</span>
-                    </div>
-                    <div className="w-px h-6 bg-slate-700/50" />
-                    <div className="flex flex-col">
-                        <span className="text-[8px] uppercase opacity-50">Fixed Groups</span>
-                        <span className="text-emerald-400">{fixedGroups.length}</span>
-                    </div>
-                    <div className="w-px h-6 bg-slate-700/50" />
-                    <div className="flex flex-col">
-                        <span className="text-[8px] uppercase opacity-50">Roster</span>
-                        <span className="text-amber-400">{roster.length}</span>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

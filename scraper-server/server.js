@@ -43,6 +43,10 @@ async function getBrowser() {
 
 // 공통 스크래핑 로직 함수
 async function scrapeCharacter(nickname, serverId = 1006) {
+    if (!nickname || nickname === 'undefined') {
+        console.error(`[에러] 유효하지 않은 닉네임 요청입니다.`);
+        return { success: false, error: "INVALID_NICKNAME" };
+    }
     console.log(`[검색] ${nickname} (서버: ${serverId}) 시작...`);
 
     let page = null;
@@ -110,11 +114,14 @@ async function scrapeCharacter(nickname, serverId = 1006) {
                 const bodyText = document.body.innerText;
                 const powerEl = document.getElementById('result-combat-power');
                 const scoreEl = document.getElementById('dps-score-value');
+                const jobEl = document.getElementById('result-job');
+
                 return {
                     raw: bodyText,
                     lines: bodyText.split('\n').map(l => l.trim()).filter(l => l.length > 0),
                     idPower: powerEl ? powerEl.innerText : null,
-                    idScore: scoreEl ? scoreEl.innerText : null
+                    idScore: scoreEl ? scoreEl.innerText : null,
+                    idJob: jobEl ? jobEl.innerText : null
                 };
             });
 
@@ -124,7 +131,16 @@ async function scrapeCharacter(nickname, serverId = 1006) {
             }
 
             const jobs = ["수호성", "검성", "살성", "궁성", "마도성", "정령성", "치유성", "호법성"];
-            const job = jobs.find(j => data.raw.includes(j)) || "미정";
+            let job = "미정";
+
+            // 1순위: 전용 ID 엘리먼트 텍스트
+            if (data.idJob && jobs.includes(data.idJob.trim())) {
+                job = data.idJob.trim();
+            }
+            // 2순위: 이미지 alt (이미지 ID: result-job-image)
+            else {
+                job = jobs.find(j => data.raw.includes(j)) || "미정";
+            }
 
             let power = parseInt((data.idPower || '').replace(/[^0-9]/g, '')) || 0;
             if (power === 0) {
@@ -275,6 +291,20 @@ cron.schedule('50 * * * *', async () => {
 
         // [New] Update Last Full Refresh Timestamp
         await db.ref('metadata/lastFullRefresh').set(new Date().toISOString());
+
+        // [New] Save Snapshot for the day
+        const todayStr = new Date().toISOString().split('T')[0];
+        const latestMembers = (await db.ref('members').once('value')).val();
+        if (latestMembers) {
+            // Store as object mapping for faster lookups in dashboard
+            const memberList = Array.isArray(latestMembers) ? latestMembers : Object.values(latestMembers);
+            const snapshotMap = memberList.reduce((acc, m) => {
+                if (m && m.id) acc[m.id] = m;
+                return acc;
+            }, {});
+            await db.ref(`snapshots/${todayStr}`).set(snapshotMap);
+            console.log(`📸 [Snapshot] ${todayStr} 저장 완료`);
+        }
 
         console.log(`✅ [Auto-Refresh] 갱신 완료! (성공: ${successCount}/${memberList.length})`);
 

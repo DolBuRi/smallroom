@@ -127,6 +127,7 @@ export default function RankingBoard() {
                     updatedList[i] = {
                         ...member,
                         power: parseInt(res.data.power),
+                        score: parseInt(res.data.score) || 0,
                         class: res.data.class,
                         guild: res.data.guild,
                         isActive: (res.data.guild === appSettings.guildName),
@@ -168,7 +169,7 @@ export default function RankingBoard() {
                 const updatedList = data.map(m => m.name === manualUpdateName.trim() ? {
                     ...m,
                     power: parseInt(res.data.power),
-                    score: parseInt(res.data.score),
+                    score: parseInt(res.data.score) || 0,
                     class: res.data.class,
                     guild: res.data.guild,
                     isActive: (res.data.guild === appSettings.guildName),
@@ -270,7 +271,7 @@ export default function RankingBoard() {
                         </button>
                     </div>
 
-                    <div className="w-px h-8 bg-slate-200 mx-0 hidden md:block" />
+                    <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
                     <button
                         onClick={handleRefreshAll}
                         disabled={isBatchRunning}
@@ -363,7 +364,7 @@ export default function RankingBoard() {
                                         <span className="text-2xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{m.name}</span>
                                         <span className="px-3 py-1 bg-slate-50 dark:bg-slate-700/50 text-slate-400 dark:text-indigo-200 text-[10px] font-black rounded-lg border border-slate-100 dark:border-slate-700 tracking-widest uppercase">{m.class}</span>
                                         {m.rank === '군단장' && <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 px-2 py-0.5 rounded-md font-black border border-amber-100 dark:border-amber-900/30 tracking-tight">군단장</span>}
-                                        {m.rank === '엘리트 장교' && <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black border border-indigo-100 dark:border-indigo-900/30 tracking-tight">엘리트 장교</span>}
+                                        {(m.rank === '장교' || m.rank === '엘리트 장교') && <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black border border-indigo-100 dark:border-indigo-900/30 tracking-tight">장교</span>}
                                     </div>
                                 </div>
 

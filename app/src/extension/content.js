@@ -91,9 +91,19 @@
                 const body = document.body.innerText;
                 const cleanBody = body.replace(/\s+/g, ' ');
 
-                let name = document.querySelector('h1')?.innerText?.split('[')[0]?.trim();
-                const jobs = ["수호성", "검성", "살성", "궁성", "마도성", "정령성", "치유성", "호법성"];
-                const job = jobs.find(j => cleanBody.includes(j)) || null;
+                const jobEl = document.getElementById('result-job');
+                const jobImg = document.getElementById('result-job-image');
+                let job = null;
+
+                if (jobEl && jobEl.innerText.trim()) {
+                    job = jobEl.innerText.trim();
+                } else if (jobImg && jobImg.alt) {
+                    job = jobImg.alt.trim();
+                } else {
+                    const jobs = ["수호성", "검성", "살성", "궁성", "마도성", "정령성", "치유성", "호법성"];
+                    // 최후의 수단으로만 본문 매칭을 시도하되, 아주 제한적인 영역에서만 찾도록 변경될 수 있음
+                    job = jobs.find(j => cleanBody.includes(j)) || null;
+                }
 
                 let power = "0";
 
