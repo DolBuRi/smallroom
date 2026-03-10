@@ -74,17 +74,24 @@ async function scrapeCharacter(nickname, serverId = 1006) {
 
             await page.goto('https://aion2tool.com', { waitUntil: 'domcontentloaded' });
 
-            // 종족 선택 (천족)
+            // 종족 선택
             try {
-                await page.waitForSelector('#race-elyos', { timeout: 3000 });
-                await page.click('#race-elyos');
-            } catch (e) { }
+                const raceSelector = parseInt(serverId) >= 2000 ? '#race-asmodian' : '#race-elyos';
+                await page.waitForSelector(raceSelector, { timeout: 3000 });
+                await page.click(raceSelector);
+                console.log(`[종족] ${parseInt(serverId) >= 2000 ? '마족' : '천족'} 선택 완료`);
+            } catch (e) {
+                console.log(`[주의] 종족 선택 실패 또는 이미 선택됨: ${e.message}`);
+            }
 
             // 서버 선택
             try {
                 await page.waitForSelector('#server-select', { timeout: 3000 });
                 await page.select('#server-select', String(serverId));
-            } catch (e) { }
+                console.log(`[서버] ID: ${serverId} 선택 완료`);
+            } catch (e) {
+                console.log(`[주의] 서버 선택 실패: ${e.message}`);
+            }
 
             // 검색어 입력
             const inputSelector = 'input[placeholder="캐릭터 닉네임 입력"]';
