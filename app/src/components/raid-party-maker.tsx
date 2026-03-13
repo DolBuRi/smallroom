@@ -584,7 +584,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [filterClass, setFilterClass] = useState('ALL');
     const [algoCards, setAlgoCards] = useState<AlgoCard[]>([
         { id: 'schedule_gating', label: '신청 스케줄 준수', desc: '신청자가 선택한 시간에만 배정합니다.', status: 'ESSENTIAL' },
-        { id: 'fixed_group', label: '고정 파티 우선', desc: '설정된 고정 파티 멤버끼리 같은 포스에 배정되도록 합니다.', status: 'ESSENTIAL' },
+        { id: 'fixed_group', label: '동일 오너 중복 방지', desc: '본캐/부캐로 묶인 동일 그룹 멤버가 같은 파티에 배정되지 않게 방지합니다.', status: 'ESSENTIAL' },
         { id: 'resurrection_anchor', label: '치유성 보장', desc: '파티당 1명의 치유성을 고정 배치합니다.', status: 'ESSENTIAL' },
         { id: 'main_tank', label: '탱커 보장', desc: '파티당 1명의 수호성/검성을 고정 배치합니다.', status: 'AVAILABLE' },
         { id: 'safety_opt', label: '검성 탱킹 보조', desc: '검성 탱커 시 호법성을 배치하여 생존력을 보강합니다.', status: 'AVAILABLE' },
@@ -832,7 +832,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         const assignedIds = new Set(parties.flatMap(p => (p.members || []).map(m => m.id)));
-        const newPool = applications.filter(a => !assignedIds.has(a.id));
+        const newPool = applications.filter(a => !assignedIds.has(a.id) && a.power >= 2700);
 
         // Apply UI Filters
         const uiFilteredPool = newPool.filter(m => {
@@ -1352,29 +1352,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         }
                     }
 
-                    // 1. Fixed Group Smart Check
+                    // 1. Fixed Group Smart Check: Check if duplicate owner in target party
                     if (member.fixedGroupId) {
-                        const groupMembers = allMembers.filter(m => m.fixedGroupId === member.fixedGroupId && m.id !== member.id);
-                        // Filter only those who applied (exist in allMembers implies they applied/are in pool context if filtered correctly, 
-                        // but allMembers here seems to be the full list including pool and parties. 
-                        // Actually 'allMembers' is prop passed from parent, usually only applicants.
-
-                        if (groupMembers.length > 0) {
-                            // Calculate Intersection of Availability for ALL group members (including self)
-                            const allGroupMembers = [member, ...groupMembers];
-                            const commonSlots = allGroupMembers.reduce((acc, m) => {
-                                const mSlots = m.availability?.[assignedDay!] || []; // Type assertion: we know assignedDay exists
-                                if (acc === null) return mSlots;
-                                return acc.filter(s => mSlots.includes(s));
-                            }, null as string[] | null) || [];
-
-                            // If target slot is NOT a common slot, but common slots exist
-                            if (!commonSlots.includes(assignedTime) && commonSlots.length > 0) {
-                                const recommendedLabel = `${assignedDay}(${getDayDate(assignedDay)}) ${getSlotLabel(commonSlots[0])}`; // Show first common slot
-
+                        if (targetParty) {
+                            const hasDuplicate = targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
+                            if (hasDuplicate) {
                                 setConfirmationModal({
                                     isOpen: true,
-                                    message: `고정 파티 [${fixedGroups.find(g => g.id === member.fixedGroupId)?.name || '그룹'}] 멤버 전원이\n'${recommendedLabel}'에 참여 가능합니다.\n\n현재 선택한 시간대에는 일부 인원이 참여할 수 없습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                    isDanger: true,
+                                    message: `선택한 파티에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
                                     onConfirm: () => {
                                         executeMove(memberId, targetId);
                                         setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1422,14 +1408,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const groupMembers = candidates.filter(m => m.fixedGroupId === gid);
             if (groupMembers.length === 0) return;
 
-            // Distribute within the Force (p1, p2)
             groupMembers.forEach(m => {
                 const isCleric = m.class === '치유성';
                 const targetParty = partiesToMatch.find(p => {
+                    const hasGroupMember = p.members.some(pm => pm.fixedGroupId === gid);
+                    if (hasGroupMember) return false;
+
                     if (isCleric) {
                         return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
                     } else {
-                        // Regular members only go to slots 1-3
                         return p.members.length < 3;
                     }
                 });
@@ -1448,7 +1435,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         partiesToMatch.forEach(p => {
             // Tank
             if (!p.members.some(m => ['수호성', '검성'].includes(m.class))) {
-                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class));
+                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
                 if (tank) {
                     p.members.push(tank);
                     usedIds.push(tank.id);
@@ -1456,7 +1443,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
             // Healer
             if (!p.members.some(m => ['치유성', '호법성'].includes(m.class))) {
-                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class));
+                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
                 if (healer) {
                     p.members.push(healer);
                     usedIds.push(healer.id);
@@ -1470,7 +1457,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         let usedIds: string[] = [];
         partiesToMatch.forEach(p => {
             while (p.members.length < 4) {
-                const ace = candidates.find(m => !usedIds.includes(m.id));
+                const ace = candidates.find(m => !usedIds.includes(m.id) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
                 if (!ace) break;
                 p.members.push(ace);
                 usedIds.push(ace.id);
@@ -1491,6 +1478,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
             // Find target party with lowest power among those with valid space
             const availableParties = partiesToMatch.filter(p => {
+                if (m.fixedGroupId && p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)) return false;
+
                 const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
                 if (isCleric) {
                     return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
@@ -1515,27 +1504,22 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchClassSynergy = (partiesToMatch: Party[], candidates: Member[]) => {
         let usedIds: string[] = [];
-        // Synergy: Magic (Sorc/Spirit) vs Phys (Glad/Sin/Ranger)
-        // Healers apply to both, but ideally Cleric for Magic, Chanter for Phys (heuristic)
 
-        // Simple logic: If a party has Magic DPS, try to add more Magic DPS or Elementalist
         partiesToMatch.forEach(p => {
             const hasMagic = p.members.some(m => ['마도성', '정령성'].includes(m.class));
             const hasPhys = p.members.some(m => ['검성', '살성', '궁성'].includes(m.class));
 
             if (p.members.length < 4) {
                 let type = hasMagic ? 'MAGIC' : (hasPhys ? 'PHYS' : 'ANY');
-                // If empty, look at candidates provided? No, just pick one to define type logic? 
-                // For now, prioritize filling with same type if established
 
                 if (type === 'MAGIC') {
-                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class));
+                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
                     if (mage) {
                         p.members.push(mage);
                         usedIds.push(mage.id);
                     }
                 } else if (type === 'PHYS') {
-                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class));
+                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
                     if (phys) {
                         p.members.push(phys);
                         usedIds.push(phys.id);
@@ -1558,8 +1542,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         });
 
         for (const p of partiesToMatch) {
-            while (sorted.length > 0) {
-                const m = sorted[0];
+            for (let i = 0; i < sorted.length; i++) {
+                const m = sorted[i];
                 const isCleric = m.class === '치유성';
                 const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
 
@@ -1570,11 +1554,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     canAdd = nonClericCount < 3;
                 }
 
-                if (canAdd) {
-                    p.members.push(sorted.shift()!);
+                if (canAdd && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId))) {
+                    p.members.push(m);
                     used.push(m.id);
-                } else {
-                    break; // This party is full for this type of member
+                    sorted.splice(i, 1);
+                    i--;
                 }
             }
         }
@@ -1583,14 +1567,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchMainTank = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
-        const tanks = candidates.filter(m => ['수호성', '검성'].includes(m.class)).sort((a, b) => b.power - a.power);
+        let tanks = candidates.filter(m => ['수호성', '검성'].includes(m.class)).sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
             if (p.members.some(m => ['수호성', '검성'].includes(m.class))) return;
             // Cap at 3 for non-cleric slots
-            if (p.members.length < 3 && tanks.length > 0) {
-                const t = tanks.shift()!;
-                p.members.push(t);
-                used.push(t.id);
+            if (p.members.length < 3) {
+                const tIdx = tanks.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                if (tIdx !== -1) {
+                    const t = tanks[tIdx];
+                    p.members.push(t);
+                    used.push(t.id);
+                    tanks.splice(tIdx, 1);
+                }
             }
         });
         return used;
@@ -1598,14 +1586,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchResurrectionAnchor = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
-        const clerics = candidates.filter(m => m.class === '치유성').sort((a, b) => b.power - a.power);
+        let clerics = candidates.filter(m => m.class === '치유성').sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
             if (p.members.some(m => m.class === '치유성')) return;
             // Cleric is the ONLY one who can fill up to 4
-            if (p.members.length < 4 && clerics.length > 0) {
-                const c = clerics.shift()!;
-                p.members.push(c);
-                used.push(c.id);
+            if (p.members.length < 4) {
+                const cIdx = clerics.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                if (cIdx !== -1) {
+                    const c = clerics[cIdx];
+                    p.members.push(c);
+                    used.push(c.id);
+                    clerics.splice(cIdx, 1);
+                }
             }
         });
         return used;
@@ -1613,17 +1605,21 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchSafetyOptimization = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
-        const chanters = candidates.filter(m => m.class === '호법성').sort((a, b) => b.power - a.power);
+        let chanters = candidates.filter(m => m.class === '호법성').sort((a, b) => b.power - a.power);
         partiesToMatch.forEach(p => {
             // Cap at 3 for Chanters (unless they are clerics, but they aren't)
             if (p.members.length >= 3) return;
             const hasGladTank = p.members.some(m => m.class === '검성');
             const hasTemplar = p.members.some(m => m.class === '수호성');
             const hasChanter = p.members.some(m => m.class === '호법성');
-            if (hasGladTank && !hasTemplar && !hasChanter && chanters.length > 0) {
-                const ch = chanters.shift()!;
-                p.members.push(ch);
-                used.push(ch.id);
+            if (hasGladTank && !hasTemplar && !hasChanter) {
+                const chIdx = chanters.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                if (chIdx !== -1) {
+                    const ch = chanters[chIdx];
+                    p.members.push(ch);
+                    used.push(ch.id);
+                    chanters.splice(chIdx, 1);
+                }
             }
         });
         return used;
@@ -1640,7 +1636,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (melees > ranges + 1) targetType = 'RANGE';
             else if (ranges > melees + 1) targetType = 'MELEE';
             else return;
-            const poolCands = candidates.filter(m => !used.includes(m.id));
+            const poolCands = candidates.filter(m => !used.includes(m.id) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
             let pick: Member | undefined;
             if (targetType === 'RANGE') {
                 pick = poolCands.find(m => ['마도성', '정령성', '궁성'].includes(m.class));
@@ -1650,7 +1646,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (pick) {
                 p.members.push(pick);
                 used.push(pick.id);
-                candidates = candidates.filter(c => c.id !== pick!.id);
             }
         });
         return used;
@@ -2904,9 +2899,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                                 <div>
                                     <h3 className="text-xl font-bold flex items-center gap-2">
-                                        <Settings size={20} className="text-slate-500" /> 고정 파티 관리
+                                        <Settings size={20} className="text-slate-500" /> 본캐 / 부캐 묶기
                                     </h3>
-                                    <p className="text-sm text-slate-500 mt-1">고정으로 운영할 파티원을 관리합니다.</p>
+                                    <p className="text-sm text-slate-500 mt-1">동일한 유저의 계정(본캐/부캐)을 묶어 시각적으로 인지하고, 중복 배정을 방지합니다.</p>
                                 </div>
                                 <button onClick={() => setIsFixedGroupModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
                                     <X size={20} />
