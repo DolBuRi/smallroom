@@ -1403,23 +1403,22 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         }
                     }
 
-                    // 1. Fixed Group Smart Check: Check if duplicate owner in target party
+                    // 1. Fixed Group Smart Check: Check if duplicate owner in target FORCE
                     if (member.fixedGroupId) {
-                        if (targetParty) {
-                            const hasDuplicate = targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
-                            if (hasDuplicate) {
-                                setConfirmationModal({
-                                    isOpen: true,
-                                    isDanger: true,
-                                    message: `선택한 파티에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
-                                    onConfirm: () => {
-                                        executeMove(memberId, targetId);
-                                        setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                    },
-                                    onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
-                                });
-                                return;
-                            }
+                        const forceMembers = [...p1.members, ...(p2?.members || [])];
+                        const hasDuplicate = forceMembers.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
+                        if (hasDuplicate) {
+                            setConfirmationModal({
+                                isOpen: true,
+                                isDanger: true,
+                                message: `선택한 포스에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                onConfirm: () => {
+                                    executeMove(memberId, targetId);
+                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                                },
+                                onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                            });
+                            return;
                         }
                     }
 
@@ -1461,9 +1460,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
             groupMembers.forEach(m => {
                 const isCleric = m.class === '치유성';
-                const targetParty = partiesToMatch.find(p => {
-                    const hasGroupMember = p.members.some(pm => pm.fixedGroupId === gid);
-                    if (hasGroupMember) return false;
+                const targetParty = partiesToMatch.find((p, pIdx) => {
+                    const forceIdx = Math.floor(pIdx / 2);
+                    const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+                    const hasGroupInForce = forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === gid));
+                    if (hasGroupInForce) return false;
 
                     if (isCleric) {
                         return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
@@ -1483,10 +1484,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchTankHealer = (partiesToMatch: Party[], candidates: Member[]) => {
         let usedIds: string[] = [];
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+            
             // Tank
             if (!p.members.some(m => ['수호성', '검성'].includes(m.class))) {
-                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (tank) {
                     p.members.push(tank);
                     usedIds.push(tank.id);
@@ -1494,7 +1498,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
             // Healer
             if (!p.members.some(m => ['치유성', '호법성'].includes(m.class))) {
-                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (healer) {
                     p.members.push(healer);
                     usedIds.push(healer.id);
@@ -1506,9 +1510,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchAceFirst = (partiesToMatch: Party[], candidates: Member[]) => {
         let usedIds: string[] = [];
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             while (p.members.length < 4) {
-                const ace = candidates.find(m => !usedIds.includes(m.id) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const ace = candidates.find(m => !usedIds.includes(m.id) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (!ace) break;
                 p.members.push(ace);
                 usedIds.push(ace.id);
@@ -1528,8 +1534,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const isCleric = m.class === '치유성';
 
             // Find target party with lowest power among those with valid space
-            const availableParties = partiesToMatch.filter(p => {
-                if (m.fixedGroupId && p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)) return false;
+            const availableParties = partiesToMatch.filter((p, pIdx) => {
+                const forceIdx = Math.floor(pIdx / 2);
+                const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+                if (m.fixedGroupId && forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))) return false;
 
                 const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
                 if (isCleric) {
@@ -1556,7 +1564,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const matchClassSynergy = (partiesToMatch: Party[], candidates: Member[]) => {
         let usedIds: string[] = [];
 
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             const hasMagic = p.members.some(m => ['마도성', '정령성'].includes(m.class));
             const hasPhys = p.members.some(m => ['검성', '살성', '궁성'].includes(m.class));
 
@@ -1564,13 +1574,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 let type = hasMagic ? 'MAGIC' : (hasPhys ? 'PHYS' : 'ANY');
 
                 if (type === 'MAGIC') {
-                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                     if (mage) {
                         p.members.push(mage);
                         usedIds.push(mage.id);
                     }
                 } else if (type === 'PHYS') {
-                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                     if (phys) {
                         p.members.push(phys);
                         usedIds.push(phys.id);
@@ -1592,7 +1602,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             return b.power - a.power;
         });
 
-        for (const p of partiesToMatch) {
+        for (let pIdx = 0; pIdx < partiesToMatch.length; pIdx++) {
+            const p = partiesToMatch[pIdx];
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+            
             for (let i = 0; i < sorted.length; i++) {
                 const m = sorted[i];
                 const isCleric = m.class === '치유성';
@@ -1605,7 +1619,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     canAdd = nonClericCount < 3;
                 }
 
-                if (canAdd && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId))) {
+                if (canAdd && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId)))) {
                     p.members.push(m);
                     used.push(m.id);
                     sorted.splice(i, 1);
@@ -1619,11 +1633,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const matchMainTank = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
         let tanks = candidates.filter(m => ['수호성', '검성'].includes(m.class)).sort((a, b) => b.power - a.power);
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             if (p.members.some(m => ['수호성', '검성'].includes(m.class))) return;
             // Cap at 3 for non-cleric slots
             if (p.members.length < 3) {
-                const tIdx = tanks.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const tIdx = tanks.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (tIdx !== -1) {
                     const t = tanks[tIdx];
                     p.members.push(t);
@@ -1638,11 +1654,13 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const matchResurrectionAnchor = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
         let clerics = candidates.filter(m => m.class === '치유성').sort((a, b) => b.power - a.power);
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             if (p.members.some(m => m.class === '치유성')) return;
             // Cleric is the ONLY one who can fill up to 4
             if (p.members.length < 4) {
-                const cIdx = clerics.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const cIdx = clerics.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (cIdx !== -1) {
                     const c = clerics[cIdx];
                     p.members.push(c);
@@ -1657,14 +1675,16 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const matchSafetyOptimization = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
         let chanters = candidates.filter(m => m.class === '호법성').sort((a, b) => b.power - a.power);
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             // Cap at 3 for Chanters (unless they are clerics, but they aren't)
             if (p.members.length >= 3) return;
             const hasGladTank = p.members.some(m => m.class === '검성');
             const hasTemplar = p.members.some(m => m.class === '수호성');
             const hasChanter = p.members.some(m => m.class === '호법성');
             if (hasGladTank && !hasTemplar && !hasChanter) {
-                const chIdx = chanters.findIndex(m => (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                const chIdx = chanters.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
                 if (chIdx !== -1) {
                     const ch = chanters[chIdx];
                     p.members.push(ch);
@@ -1678,7 +1698,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     const matchCombatLogic = (partiesToMatch: Party[], candidates: Member[]) => {
         const used: string[] = [];
-        partiesToMatch.forEach(p => {
+        partiesToMatch.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             // Cap at 3
             if (p.members.length >= 3) return;
             const melees = p.members.filter(m => ['수호성', '검성', '살성', '호법성'].includes(m.class)).length;
@@ -1687,7 +1709,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (melees > ranges + 1) targetType = 'RANGE';
             else if (ranges > melees + 1) targetType = 'MELEE';
             else return;
-            const poolCands = candidates.filter(m => !used.includes(m.id) && (!m.fixedGroupId || !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+            const poolCands = candidates.filter(m => !used.includes(m.id) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
             let pick: Member | undefined;
             if (targetType === 'RANGE') {
                 pick = poolCands.find(m => ['마도성', '정령성', '궁성'].includes(m.class));
@@ -1780,44 +1802,28 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             break;
                         case 'fixed_group':
                             {
-                                // Check for fixed group split with intersection rule:
-                                // If members have an overlapping time, they must be in the same force.
-                                // If no overlapping time is possible, splitting is not penalized.
-                                const groups = new Set(currentPool.concat(partiesToEval.flatMap(p => p.members)).map(m => m.fixedGroupId).filter(Boolean));
+                                // Check for fixed group conflict in force:
+                                // One person (owner) per Force rule.
+                                const groups = new Set<string>();
+                                partiesToEval.forEach(p => p.members.forEach(m => {
+                                    if (m.fixedGroupId) groups.add(m.fixedGroupId);
+                                }));
+
                                 groups.forEach(gid => {
-                                    const gMembers = currentPool.concat(partiesToEval.flatMap(p => p.members)).filter(m => m.fixedGroupId === gid);
-                                    if (gMembers.length <= 1) return;
-
-                                    // Intersection check across ALL group members
-                                    let hasOverlap = false;
-                                    for (const day of RAID_DAYS) {
-                                        let intersection = gMembers[0].availability?.[day] || [];
-                                        for (let i = 1; i < gMembers.length; i++) {
-                                            const slots = gMembers[i].availability?.[day] || [];
-                                            intersection = intersection.filter(s => slots.includes(s));
-                                            if (intersection.length === 0) break;
+                                    const forceCounts = new Map<number, number>();
+                                    partiesToEval.forEach((p, pIdx) => {
+                                        const forceIdx = Math.floor(pIdx / 2);
+                                        const countInParty = p.members.filter(m => m.fixedGroupId === gid).length;
+                                        if (countInParty > 0) {
+                                            forceCounts.set(forceIdx, (forceCounts.get(forceIdx) || 0) + countInParty);
                                         }
-                                        if (intersection.length > 0) {
-                                            hasOverlap = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if (!hasOverlap) return; // No possibility to be together, no penalty for splitting
-
-                                    const forceIndices = gMembers.map(m => {
-                                        const pIdx = partiesToEval.findIndex(p => p.members.some(pm => pm.id === m.id));
-                                        return pIdx === -1 ? -1 : Math.floor(pIdx / 2);
                                     });
 
-                                    const assignedForceIds = forceIndices.filter(idx => idx !== -1);
-                                    if (assignedForceIds.length > 0) {
-                                        const firstForce = assignedForceIds[0];
-                                        // Penalty if split across forces OR some are left in pool when they COULD have joined a force together
-                                        if (assignedForceIds.some(idx => idx !== firstForce) || forceIndices.some(idx => idx === -1)) {
-                                            v++;
+                                    forceCounts.forEach((count) => {
+                                        if (count > 1) {
+                                            v += (count - 1); // Each additional member in same force is a violation
                                         }
-                                    }
+                                    });
                                 });
                             }
                             break;
@@ -1909,8 +1915,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         // Fill randomly but respecting schedule if possible
         let tempPool = [...workingPool];
-        workingParties.forEach(p => {
-            const availableForThis = tempPool.filter(m => m.availability?.[p.assignedDay!]?.includes(p.assignedTime!));
+        workingParties.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [workingParties[forceIdx * 2], workingParties[forceIdx * 2 + 1]].filter(Boolean);
+            const availableForThis = tempPool.filter(m => {
+                const isTimeMatch = m.availability?.[p.assignedDay!]?.includes(p.assignedTime!);
+                const isGroupDuplicate = m.fixedGroupId && forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                return isTimeMatch && !isGroupDuplicate;
+            });
+
             while (p.members.length < 4 && availableForThis.length > 0) {
                 const m = availableForThis.shift()!;
                 p.members.push(m);
@@ -1918,9 +1931,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
         });
         // Rest of pool
-        workingParties.forEach(p => {
+        workingParties.forEach((p, pIdx) => {
+            const forceIdx = Math.floor(pIdx / 2);
+            const forceParties = [workingParties[forceIdx * 2], workingParties[forceIdx * 2 + 1]].filter(Boolean);
             while (p.members.length < 4 && tempPool.length > 0) {
-                p.members.push(tempPool.shift()!);
+                const targetIdx = tempPool.findIndex(m => !m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId)));
+                if (targetIdx !== -1) {
+                    const m = tempPool.splice(targetIdx, 1)[0];
+                    p.members.push(m);
+                } else {
+                    // If no one without collision is left, just take the first one (will be penalized later but prevents infinite loop)
+                    p.members.push(tempPool.shift()!);
+                }
             }
         });
         workingPool = tempPool;
