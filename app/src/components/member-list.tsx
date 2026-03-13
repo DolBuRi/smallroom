@@ -484,8 +484,8 @@ export default function MemberList() {
                             <Sheet size={18} /> 구글 시트
                         </button>
                     )}
-                    {!isManageMode ? (
-                        <button onClick={() => isAdmin ? setIsManageMode(true) : alert("관리자 권한 필요")} className="text-slate-500 hover:text-indigo-600 hover:bg-white transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-transparent hover:border-indigo-100 shadow-sm dark:text-slate-400">
+                    {isAdmin && (!isManageMode ? (
+                        <button onClick={() => setIsManageMode(true)} className="text-slate-500 hover:text-indigo-600 hover:bg-white transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-transparent hover:border-indigo-100 shadow-sm dark:text-slate-400">
                             <Settings size={18} /> 관리하기
                         </button>
                     ) : (
@@ -494,7 +494,7 @@ export default function MemberList() {
                             {selectedIds.length > 0 && <button onClick={deleteSelected} className="px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 rounded-xl transition-all flex items-center gap-2"><Trash2 size={16} /> 삭제 ({selectedIds.length})</button>}
                             <button onClick={() => { setIsManageMode(false); setSelectedIds([]); }} className="px-4 py-2 text-sm font-black text-slate-400 hover:text-slate-600 transition-all">닫기</button>
                         </div>
-                    )}
+                    ))}
                     <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
                     <ManualRefreshInput isManageMode={isManageMode} isManualUpdating={isManualUpdating} onUpdate={handleManualUpdate} />
                     <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
