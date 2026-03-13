@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle, Link } from 'lucide-react';
+import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle, Link, Search } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
 import { db } from '@/lib/firebase';
@@ -733,42 +733,48 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         isSub: true
                     })) : [];
 
-                    // Derive dynamic fixedGroups based on subList ownerNames
-                    const groupedOwners = new Set<string>();
-                    subListRaw.forEach(s => {
-                        if (s.ownerName) groupedOwners.add(s.ownerName);
-                    });
-                    
-                    const roster = rosterRaw.map(m => ({
-                        ...m,
-                        fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
-                    }));
+                    let roster = rosterRaw;
+                    let subList = subListRaw;
 
-                    const subList = subListRaw.map(m => ({
-                        ...m,
-                        fixedGroupId: m.ownerName
-                    }));
+                    if (mode === 'fixed') {
+                        // Derive dynamic fixedGroups based on subList ownerNames
+                        const groupedOwners = new Set<string>();
+                        subListRaw.forEach(s => {
+                            if (s.ownerName) groupedOwners.add(s.ownerName);
+                        });
+                        
+                        roster = rosterRaw.map(m => ({
+                            ...m,
+                            fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
+                        }));
+
+                        subList = subListRaw.map(m => ({
+                            ...m,
+                            fixedGroupId: m.ownerName
+                        }));
+
+                        // Update fixedGroups UI State for the modal via DB
+                        get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
+                            const globalColors = colorSnap.exists() ? colorSnap.val() : {};
+                            
+                            const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
+                                const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
+                                const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                                
+                                return {
+                                    id: ownerName,
+                                    name: ownerName,
+                                    color: globalColors[ownerName] || colors[idx % colors.length],
+                                    memberIds: groupMembers
+                                };
+                            });
+                            setFixedGroups(dynamicFixedGroups);
+                        });
+                    }
+
 
                     setAllMembers(roster);
                     setAllSubChars(subList);
-
-                    // Update fixedGroups UI State for the modal via DB
-                    get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
-                        const globalColors = colorSnap.exists() ? colorSnap.val() : {};
-                        
-                        const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
-                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
-                            const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
-                            
-                            return {
-                                id: ownerName,
-                                name: ownerName,
-                                color: globalColors[ownerName] || colors[idx % colors.length],
-                                memberIds: groupMembers
-                            };
-                        });
-                        setFixedGroups(dynamicFixedGroups);
-                    });
 
                     // 3. Load Attendance (Excluded Owners)
                     const attendanceRef = ref(db, dbPath.raidAttendance);
@@ -1403,15 +1409,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         }
                     }
 
-                    // 1. Fixed Group Smart Check: Check if duplicate owner in target FORCE
+                    // 1. Fixed Group Smart Check: Check if duplicate owner
                     if (member.fixedGroupId) {
-                        const forceMembers = [...p1.members, ...(p2?.members || [])];
-                        const hasDuplicate = forceMembers.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
-                        if (hasDuplicate) {
+                        const isDuplicate = mode === 'fixed' 
+                            ? [...p1.members, ...(p2?.members || [])].some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id)
+                            : targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
+
+                        if (isDuplicate) {
+                            const scopeLabel = mode === 'fixed' ? '포스' : '파티';
                             setConfirmationModal({
                                 isOpen: true,
                                 isDanger: true,
-                                message: `선택한 포스에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                message: `선택한 ${scopeLabel}에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
                                 onConfirm: () => {
                                     executeMove(memberId, targetId);
                                     setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1461,10 +1470,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             groupMembers.forEach(m => {
                 const isCleric = m.class === '치유성';
                 const targetParty = partiesToMatch.find((p, pIdx) => {
-                    const forceIdx = Math.floor(pIdx / 2);
-                    const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
-                    const hasGroupInForce = forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === gid));
-                    if (hasGroupInForce) return false;
+                    if (mode === 'fixed') {
+                        const forceIdx = Math.floor(pIdx / 2);
+                        const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+                        const hasGroupInForce = forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === gid));
+                        if (hasGroupInForce) return false;
+                    } else {
+                        const hasGroupInParty = p.members.some(pm => pm.fixedGroupId === gid);
+                        if (hasGroupInParty) return false;
+                    }
 
                     if (isCleric) {
                         return p.members.length < 4 && !p.members.some(pm => pm.class === '치유성');
@@ -1488,9 +1502,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const forceIdx = Math.floor(pIdx / 2);
             const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             
+            const checkCollision = (m: Member) => {
+                if (!m.fixedGroupId) return true;
+                if (mode === 'fixed') {
+                    return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                } else {
+                    return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                }
+            };
+
             // Tank
             if (!p.members.some(m => ['수호성', '검성'].includes(m.class))) {
-                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const tank = candidates.find(m => !usedIds.includes(m.id) && ['수호성', '검성'].includes(m.class) && checkCollision(m));
                 if (tank) {
                     p.members.push(tank);
                     usedIds.push(tank.id);
@@ -1498,7 +1521,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
             // Healer
             if (!p.members.some(m => ['치유성', '호법성'].includes(m.class))) {
-                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const healer = candidates.find(m => !usedIds.includes(m.id) && ['치유성', '호법성'].includes(m.class) && checkCollision(m));
                 if (healer) {
                     p.members.push(healer);
                     usedIds.push(healer.id);
@@ -1514,7 +1537,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const forceIdx = Math.floor(pIdx / 2);
             const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
             while (p.members.length < 4) {
-                const ace = candidates.find(m => !usedIds.includes(m.id) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const ace = candidates.find(m => {
+                    if (usedIds.includes(m.id)) return false;
+                    if (!m.fixedGroupId) return true;
+                    if (mode === 'fixed') {
+                        return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                    } else {
+                        return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                    }
+                });
                 if (!ace) break;
                 p.members.push(ace);
                 usedIds.push(ace.id);
@@ -1535,9 +1566,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
             // Find target party with lowest power among those with valid space
             const availableParties = partiesToMatch.filter((p, pIdx) => {
-                const forceIdx = Math.floor(pIdx / 2);
-                const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
-                if (m.fixedGroupId && forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))) return false;
+                if (m.fixedGroupId) {
+                    if (mode === 'fixed') {
+                        const forceIdx = Math.floor(pIdx / 2);
+                        const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
+                        if (forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))) return false;
+                    } else {
+                        if (p.members.some(pm => pm.fixedGroupId === m.fixedGroupId)) return false;
+                    }
+                }
 
                 const nonClericCount = p.members.filter(pm => pm.class !== '치유성').length;
                 if (isCleric) {
@@ -1574,13 +1611,29 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 let type = hasMagic ? 'MAGIC' : (hasPhys ? 'PHYS' : 'ANY');
 
                 if (type === 'MAGIC') {
-                    const mage = candidates.find(m => !usedIds.includes(m.id) && ['마도성', '정령성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                    const mage = candidates.find(m => {
+                        if (usedIds.includes(m.id) || !['마도성', '정령성'].includes(m.class)) return false;
+                        if (!m.fixedGroupId) return true;
+                        if (mode === 'fixed') {
+                            return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                        } else {
+                            return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                        }
+                    });
                     if (mage) {
                         p.members.push(mage);
                         usedIds.push(mage.id);
                     }
                 } else if (type === 'PHYS') {
-                    const phys = candidates.find(m => !usedIds.includes(m.id) && ['검성', '살성', '궁성'].includes(m.class) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                    const phys = candidates.find(m => {
+                        if (usedIds.includes(m.id) || !['검성', '살성', '궁성'].includes(m.class)) return false;
+                        if (!m.fixedGroupId) return true;
+                        if (mode === 'fixed') {
+                            return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                        } else {
+                            return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                        }
+                    });
                     if (phys) {
                         p.members.push(phys);
                         usedIds.push(phys.id);
@@ -1619,7 +1672,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     canAdd = nonClericCount < 3;
                 }
 
-                if (canAdd && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId)))) {
+                const isDuplicate = mode === 'fixed'
+                    ? forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))
+                    : p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+
+                if (canAdd && (!m.fixedGroupId || !isDuplicate)) {
                     p.members.push(m);
                     used.push(m.id);
                     sorted.splice(i, 1);
@@ -1639,7 +1696,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (p.members.some(m => ['수호성', '검성'].includes(m.class))) return;
             // Cap at 3 for non-cleric slots
             if (p.members.length < 3) {
-                const tIdx = tanks.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const tIdx = tanks.findIndex(m => {
+                    if (!m.fixedGroupId) return true;
+                    if (mode === 'fixed') {
+                        return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                    } else {
+                        return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                    }
+                });
                 if (tIdx !== -1) {
                     const t = tanks[tIdx];
                     p.members.push(t);
@@ -1660,7 +1724,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (p.members.some(m => m.class === '치유성')) return;
             // Cleric is the ONLY one who can fill up to 4
             if (p.members.length < 4) {
-                const cIdx = clerics.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const cIdx = clerics.findIndex(m => {
+                    if (!m.fixedGroupId) return true;
+                    if (mode === 'fixed') {
+                        return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                    } else {
+                        return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                    }
+                });
                 if (cIdx !== -1) {
                     const c = clerics[cIdx];
                     p.members.push(c);
@@ -1684,7 +1755,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const hasTemplar = p.members.some(m => m.class === '수호성');
             const hasChanter = p.members.some(m => m.class === '호법성');
             if (hasGladTank && !hasTemplar && !hasChanter) {
-                const chIdx = chanters.findIndex(m => (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+                const chIdx = chanters.findIndex(m => {
+                    if (!m.fixedGroupId) return true;
+                    if (mode === 'fixed') {
+                        return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                    } else {
+                        return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                    }
+                });
                 if (chIdx !== -1) {
                     const ch = chanters[chIdx];
                     p.members.push(ch);
@@ -1709,7 +1787,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (melees > ranges + 1) targetType = 'RANGE';
             else if (ranges > melees + 1) targetType = 'MELEE';
             else return;
-            const poolCands = candidates.filter(m => !used.includes(m.id) && (!m.fixedGroupId || !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId))));
+            const poolCands = candidates.filter(m => {
+                if (used.includes(m.id)) return false;
+                if (!m.fixedGroupId) return true;
+                if (mode === 'fixed') {
+                    return !forceParties.some(fp => fp.members.some(pm => pm.fixedGroupId === m.fixedGroupId));
+                } else {
+                    return !p.members.some(pm => pm.fixedGroupId === m.fixedGroupId);
+                }
+            });
             let pick: Member | undefined;
             if (targetType === 'RANGE') {
                 pick = poolCands.find(m => ['마도성', '정령성', '궁성'].includes(m.class));
@@ -1812,10 +1898,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 groups.forEach(gid => {
                                     const forceCounts = new Map<number, number>();
                                     partiesToEval.forEach((p, pIdx) => {
-                                        const forceIdx = Math.floor(pIdx / 2);
+                                        const groupIdx = mode === 'fixed' ? Math.floor(pIdx / 2) : pIdx; // Check force or party
                                         const countInParty = p.members.filter(m => m.fixedGroupId === gid).length;
                                         if (countInParty > 0) {
-                                            forceCounts.set(forceIdx, (forceCounts.get(forceIdx) || 0) + countInParty);
+                                            forceCounts.set(groupIdx, (forceCounts.get(groupIdx) || 0) + countInParty);
                                         }
                                     });
 
@@ -2984,6 +3070,19 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             <div className="flex flex-1 overflow-hidden">
                                 {/* Left: Group List */}
                                 <div className="w-1/3 border-r border-slate-100 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto space-y-2">
+                                    {mode === 'legion' && (
+                                        <button
+                                            onClick={() => {
+                                                const newId = `fg-${Date.now()}`;
+                                                const newGroup = { id: newId, name: `새 팀 ${fixedGroups.length + 1}`, color: 'bg-slate-500', memberIds: [] };
+                                                const updated = [...fixedGroups, newGroup];
+                                                set(ref(db, dbPath.fixedGroups), updated);
+                                            }}
+                                            className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 text-slate-400 hover:text-indigo-500 hover:border-indigo-500 transition-all font-bold text-sm mb-4"
+                                        >
+                                            <Plus size={16} /> 새 팀 추가
+                                        </button>
+                                    )}
                                     {fixedGroups.map(fg => (
                                         <button
                                             key={fg.id}
@@ -3031,6 +3130,21 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                 {selectedGroup?.name}
                                                             </h4>
                                                         </div>
+                                                        {mode === 'legion' && (
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const updated = fixedGroups.filter(g => g.id !== selectedFixedGroupId);
+                                                                        set(ref(db, dbPath.fixedGroups), updated);
+                                                                        setSelectedFixedGroupId(null);
+                                                                    }}
+                                                                    className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                                                                    title="팀 삭제"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
 
                                                     {/* Color Picker (Toggled) */}
@@ -3067,8 +3181,31 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                     )}
 
                                                     {/* Member List */}
-                                                    <div className="flex-1 overflow-y-auto space-y-2">
-                                                        {selectedGroup?.memberIds.length === 0 ? (
+                                                        <div className="flex-1 overflow-y-auto space-y-2">
+                                                            {/* Add Member Input (Legion only) */}
+                                                            {mode === 'legion' && (
+                                                                <div className="relative mb-4 group">
+                                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder="멤버 추가 (닉네임 입력 후 엔터)"
+                                                                        className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') {
+                                                                                const name = e.currentTarget.value.trim();
+                                                                                if (name && !selectedGroup.memberIds.includes(name)) {
+                                                                                    const updated = fixedGroups.map(g =>
+                                                                                        g.id === selectedFixedGroupId ? { ...g, memberIds: [...g.memberIds, name] } : g
+                                                                                    );
+                                                                                    set(ref(db, dbPath.fixedGroups), updated);
+                                                                                    e.currentTarget.value = '';
+                                                                                }
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            {selectedGroup?.memberIds.length === 0 ? (
                                                             <div className="h-40 flex flex-col items-center justify-center text-slate-400 opacity-60">
                                                                 <p className="text-sm">등록된 멤버가 없습니다.</p>
                                                             </div>
@@ -3085,13 +3222,26 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                                     </div>
                                                                                     <span className="font-bold text-sm">
                                                                                         {member.name}
-                                                                                        {member.name === selectedGroup.id && <span className="ml-2 text-xs text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded font-black">본캐</span>}
+                                                                                        {mode === 'fixed' && member.name === selectedGroup.id && <span className="ml-2 text-xs text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded font-black">본캐</span>}
                                                                                     </span>
                                                                                 </>
                                                                             ) : (
                                                                                 <span className="text-slate-400 text-sm">Unknown ({mid})</span>
                                                                             )}
                                                                         </div>
+                                                                        {mode === 'legion' && (
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const updated = fixedGroups.map(g =>
+                                                                                        g.id === selectedFixedGroupId ? { ...g, memberIds: g.memberIds.filter(id => id !== mid) } : g
+                                                                                    );
+                                                                                    set(ref(db, dbPath.fixedGroups), updated);
+                                                                                }}
+                                                                                className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                                                                            >
+                                                                                <X size={14} />
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                 );
                                                             })
