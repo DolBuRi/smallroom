@@ -1353,7 +1353,27 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         const sourceId = findContainer(memberId);
-        if (sourceId === targetId) return;
+        if (sourceId === targetId) {
+            if (active.id !== over.id && sourceId && sourceId !== 'pool') {
+                const partyIdx = parties.findIndex(p => p.id === sourceId);
+                if (partyIdx !== -1) {
+                    const newParties = parties.map(p => ({ ...p, members: [...p.members] }));
+                    const party = newParties[partyIdx];
+                    const oldIndex = party.members.findIndex(m => m.id === active.id);
+                    const newIndex = party.members.findIndex(m => m.id === over.id);
+                    if (oldIndex !== -1 && newIndex !== -1) {
+                        party.members = arrayMove(party.members, oldIndex, newIndex);
+                        
+                        saveMatchingState(newParties).then(success => {
+                            if (success) {
+                                setParties(newParties);
+                            }
+                        });
+                    }
+                }
+            }
+            return;
+        }
 
         const member = findMember(memberId);
         if (!member) return;
