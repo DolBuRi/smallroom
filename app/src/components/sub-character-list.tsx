@@ -536,6 +536,12 @@ export default function SubCharacterList() {
                                     <input type="text" placeholder="예: 부트띠" className="glass-input w-full px-4 font-bold h-12" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
                                 </div>
                                 <div className="space-y-2">
+                                    <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 서버</label>
+                                    <select value={searchServer} onChange={(e) => setSearchServer(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 h-12 text-sm font-black outline-none appearance-none cursor-pointer">
+                                        {SERVER_LIST.filter(s => s.id !== 'all').map(s => <option key={s.id} value={s.id}>{s.faction} - {s.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
                                     <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 닉네임</label>
                                     <div className="relative">
                                         <input type="text" placeholder="부캐 닉네임 입력" className="glass-input w-full pl-4 pr-12 font-bold h-12" value={searchName} onChange={(e) => setSearchName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} />
@@ -543,12 +549,6 @@ export default function SubCharacterList() {
                                             {isSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
                                         </button>
                                     </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 서버</label>
-                                    <select value={searchServer} onChange={(e) => setSearchServer(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 h-12 text-sm font-black outline-none appearance-none cursor-pointer">
-                                        {SERVER_LIST.filter(s => s.id !== 'all').map(s => <option key={s.id} value={s.id}>{s.faction} - {s.name}</option>)}
-                                    </select>
                                 </div>
                             </div>
 
