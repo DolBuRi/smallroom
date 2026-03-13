@@ -749,23 +749,26 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         fixedGroupId: m.ownerName
                     }));
 
-                    // Update fixedGroups UI State for the modal via DB
-                    get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
-                        const globalColors = colorSnap.exists() ? colorSnap.val() : {};
-                        
-                        const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
-                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
-                            const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                    // Update fixedGroups UI State for the modal via DB (ONLY for fixed mode)
+                    // In legion mode, fixedGroups are loaded from dbPath.fixedGroups by a separate useEffect 
+                    if (mode === 'fixed') {
+                        get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
+                            const globalColors = colorSnap.exists() ? colorSnap.val() : {};
                             
-                            return {
-                                id: ownerName,
-                                name: ownerName,
-                                color: globalColors[ownerName] || colors[idx % colors.length],
-                                memberIds: groupMembers
-                            };
+                            const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
+                                const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
+                                const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                                
+                                return {
+                                    id: ownerName,
+                                    name: ownerName,
+                                    color: globalColors[ownerName] || colors[idx % colors.length],
+                                    memberIds: groupMembers
+                                };
+                            });
+                            setFixedGroups(dynamicFixedGroups);
                         });
-                        setFixedGroups(dynamicFixedGroups);
-                    });
+                    }
 
                     setAllMembers(roster);
                     setAllSubChars(subList);
@@ -3052,9 +3055,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                                 <div>
                                     <h3 className="text-xl font-bold flex items-center gap-2">
-                                        <Settings size={20} className="text-slate-500" /> 본캐 / 부캐 묶기
+                                        <Settings size={20} className="text-slate-500" />
+                                        {mode === 'fixed' ? '본캐 / 부캐 묶기' : '고정 파티 설정'}
                                     </h3>
-                                    <p className="text-sm text-slate-500 mt-1">동일한 유저의 계정(본캐/부캐)을 묶어 시각적으로 인지하고, 중복 배정을 방지합니다.</p>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        {mode === 'fixed'
+                                            ? '동일한 유저의 계정(본캐/부캐)을 묶어 시각적으로 인지하고, 중복 배정을 방지합니다.'
+                                            : '고정으로 함께할 멤버를 설정합니다.'}
+                                    </p>
                                 </div>
                                 <button onClick={() => setIsFixedGroupModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full">
                                     <X size={20} />
