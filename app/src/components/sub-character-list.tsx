@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Sword } from 'lucide-react';
+import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Sword, Pin } from 'lucide-react';
 import { cn, formatRelativeTime, getClassColor, getJobShortName } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, remove } from 'firebase/database';
@@ -25,6 +25,22 @@ export default function SubCharacterList() {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [lastFullRefresh, setLastFullRefresh] = useState<string | null>(null);
     const [viewMode, setViewMode] = useState<'owner' | 'class'>('owner');
+    const [pinnedOwner, setPinnedOwner] = useState<string | null>(null);
+
+    useEffect(() => {
+        const saved = localStorage.getItem('pinnedOwner');
+        if (saved) setPinnedOwner(saved);
+    }, []);
+
+    const togglePin = (owner: string) => {
+        if (pinnedOwner === owner) {
+            setPinnedOwner(null);
+            localStorage.removeItem('pinnedOwner');
+        } else {
+            setPinnedOwner(owner);
+            localStorage.setItem('pinnedOwner', owner);
+        }
+    };
 
     // Add Modal state
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -349,7 +365,13 @@ export default function SubCharacterList() {
                     <div className="glass-panel py-20 text-center text-slate-400 font-bold">등록된 부캐 정보가 없습니다.</div>
                 ) : viewMode === 'owner' ? (
                     /* Grouped by Owner */
-                    Object.entries(groupedChars).map(([owner, chars]) => {
+                    Object.entries(groupedChars)
+                        .sort(([ownerA], [ownerB]) => {
+                            if (ownerA === pinnedOwner) return -1;
+                            if (ownerB === pinnedOwner) return 1;
+                            return 0;
+                        })
+                        .map(([owner, chars]) => {
                         const ownerInfo = mainMembers.find(m => m.name === owner);
                         const ownerClass = ownerInfo?.class || '';
                         
@@ -364,6 +386,13 @@ export default function SubCharacterList() {
                                             <div className="flex items-center gap-2">
                                                 <h3 className="text-xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{owner}</h3>
                                                 <span className="text-slate-400 font-bold text-sm">의 부캐 목록</span>
+                                                <button
+                                                    onClick={() => togglePin(owner)}
+                                                    className={cn("ml-2 p-1.5 rounded-lg transition-all", pinnedOwner === owner ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400" : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600")}
+                                                    title={pinnedOwner === owner ? "최상단 고정 해제" : "내 캐릭터로 설정하여 최상단에 고정"}
+                                                >
+                                                    <Pin size={16} className={pinnedOwner === owner ? "fill-amber-500 dark:fill-amber-400" : ""} />
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
