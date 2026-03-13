@@ -860,18 +860,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             } else if (data && data.parties) {
                 // handle non-array if somehow corrupted but parties exist
             } else {
+                // No session data — set local defaults only, do NOT auto-write to Firebase
                 const initialParties = Array.from({ length: 4 }, (_, i) => ({
                     id: `party-${i + 1}`, name: `${i + 1}파티`, members: []
                 }));
-                if (isAdmin) {
-                    set(sessionRef, {
-                        parties: initialParties,
-                        version: 1
-                    });
-                } else {
-                    setParties(initialParties);
-                    setServerVersion(0);
-                }
+                setParties(initialParties);
+                setServerVersion(0);
             }
         });
 
@@ -940,12 +934,21 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     // 2. Load Fixed Groups (One-time or Mock)
+    // IMPORTANT: This loader is ONLY for 'legion' mode.
+    // In 'fixed' mode, fixedGroups are auto-derived from sub-characters in loadData().
+    // NEVER auto-write defaults to Firebase — it can overwrite real data.
     useEffect(() => {
         if (testMode) {
             setFixedGroups([
                 { id: 'fg-1', name: '테스트 1팀', color: 'bg-rose-500', memberIds: ['mock-0', 'mock-1', 'mock-2'] },
                 { id: 'fg-2', name: '테스트 2팀', color: 'bg-indigo-500', memberIds: [] }
             ]);
+            setIsFixedGroupsLoaded(true);
+            return;
+        }
+
+        // Skip for fixed mode — fixed mode derives groups from sub-characters
+        if (mode === 'fixed') {
             setIsFixedGroupsLoaded(true);
             return;
         }
@@ -962,17 +965,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     }));
                     setFixedGroups(sanitized);
                 } else {
-                    // Default Init if empty
-                    const defaults = [
+                    // No data exists — set local defaults only, do NOT write to Firebase
+                    setFixedGroups([
                         { id: 'fg-1', name: '1팀', color: 'bg-rose-500', memberIds: [] },
                         { id: 'fg-2', name: '2팀', color: 'bg-indigo-500', memberIds: [] }
-                    ];
-                    setFixedGroups(defaults);
-                    set(ref(db, dbPath.fixedGroups), defaults); // Create initial
+                    ]);
                 }
             } catch (e) {
                 console.error("Failed to load fixed groups", e);
-                // Fallback local defaults
                 setFixedGroups([
                     { id: 'fg-1', name: '1팀', color: 'bg-rose-500', memberIds: [] },
                     { id: 'fg-2', name: '2팀', color: 'bg-indigo-500', memberIds: [] }
@@ -982,7 +982,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
         };
         loadFixedGroups();
-    }, [testMode]);
+    }, [testMode, mode]);
 
     // 2.5 Load Algo Settings from DB
     useEffect(() => {
