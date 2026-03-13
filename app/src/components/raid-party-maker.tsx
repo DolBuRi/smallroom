@@ -578,6 +578,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [isAlgoLoaded, setIsAlgoLoaded] = useState(false); // Added for persistence
     const [serverVersion, setServerVersion] = useState(0); // Added for Version Sync
     const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+    const [groupColorsMap, setGroupColorsMap] = useState<Record<string, string>>({});
 
     // --- Filters ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -751,25 +752,23 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     setAllMembers(roster);
                     setAllSubChars(subList);
 
-                    // Update fixedGroups UI State for the modal
-                    const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
-                        const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
-                        const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                    // Update fixedGroups UI State for the modal via DB
+                    get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
+                        const globalColors = colorSnap.exists() ? colorSnap.val() : {};
                         
-                        let savedColor = null;
-                        try {
-                            const groupColors = JSON.parse(localStorage.getItem('groupColors') || '{}');
-                            savedColor = groupColors[ownerName];
-                        } catch (e) {}
-
-                        return {
-                            id: ownerName,
-                            name: ownerName,
-                            color: savedColor || colors[idx % colors.length],
-                            memberIds: groupMembers
-                        };
+                        const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
+                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
+                            const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                            
+                            return {
+                                id: ownerName,
+                                name: ownerName,
+                                color: globalColors[ownerName] || colors[idx % colors.length],
+                                memberIds: groupMembers
+                            };
+                        });
+                        setFixedGroups(dynamicFixedGroups);
                     });
-                    setFixedGroups(dynamicFixedGroups);
 
                     // 3. Load Attendance (Excluded Owners)
                     const attendanceRef = ref(db, dbPath.raidAttendance);
@@ -819,6 +818,21 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         };
         loadData();
     }, [testMode, mode, dbPath]);
+
+    // 2. Real-time Sync for Group Colors
+    useEffect(() => {
+        if (testMode) return;
+        const colorsRef = ref(db, `${dbPath.settings}/groupColors`);
+        const unsubscribe = onValue(colorsRef, (snap) => {
+            const data = snap.val() || {};
+            setGroupColorsMap(data);
+            setFixedGroups(prev => prev.map(fg => ({
+                ...fg,
+                color: data[fg.id] || fg.color
+            })));
+        });
+        return () => unsubscribe();
+    }, [testMode, dbPath]);
 
     // 2. Real-time Sync for Parties
     useEffect(() => {
@@ -3013,11 +3027,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                             fg.id === selectedFixedGroupId ? { ...fg, color } : fg
                                                                         );
                                                                         setFixedGroups(newGroups);
-                                                                        try {
-                                                                            const groupColors = JSON.parse(localStorage.getItem('groupColors') || '{}');
-                                                                            groupColors[selectedFixedGroupId] = color;
-                                                                            localStorage.setItem('groupColors', JSON.stringify(groupColors));
-                                                                        } catch (e) {}
+                                                                        
+                                                                        // Sync globally
+                                                                        if (selectedFixedGroupId) {
+                                                                            const colorMap = { ...groupColorsMap, [selectedFixedGroupId]: color };
+                                                                            set(ref(db, `${dbPath.settings}/groupColors`), colorMap);
+                                                                        }
                                                                     }}
                                                                     className={cn(
                                                                         "w-8 h-8 rounded-full shrink-0 transition-all border-2",
