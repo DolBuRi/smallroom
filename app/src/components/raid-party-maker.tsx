@@ -1371,53 +1371,77 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 const assignedDay = p1.assignedDay || p2?.assignedDay;
                 const assignedTime = p1.assignedTime || p2?.assignedTime;
 
-                // --- NEW LOGIC: If Force Time is NOT set ---
-                if (!assignedDay || !assignedTime) {
-                    // NEW: Handle Priority - If filters are already selected, use them immediately
-                    if (selectedDay !== 'ALL' && selectedSlot) {
-                        executeMove(memberId, targetId, selectedDay, selectedSlot);
-                        return;
-                    }
+                // 1. Fixed Group Smart Check: Check if duplicate owner ALWAYS
+                if (member.fixedGroupId) {
+                    const isDuplicate = mode === 'fixed' 
+                        ? [...p1.members, ...(p2?.members || [])].some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id)
+                        : targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
 
-                    // Check if member actually has any availability to offer
-                    const hasAvailability = RAID_DAYS.some(day => (member.availability?.[day]?.length || 0) > 0);
-
-                    if (hasAvailability) {
-                        setTimeSelectionModal({
+                    if (isDuplicate) {
+                        const scopeLabel = mode === 'fixed' ? '포스' : '파티';
+                        setConfirmationModal({
                             isOpen: true,
-                            member,
-                            targetPartyId: targetId
+                            isDanger: true,
+                            message: `선택한 ${scopeLabel}에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                            onConfirm: () => {
+                                executeMove(memberId, targetId);
+                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                            },
+                            onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
                         });
-                        return; // Stop default execution
-                    } else {
-                        // Minimalist feedback if member has 0 availability
-                        alert(`${member.name}님은 신청한 시간대가 없어 포스 시간을 자동 설정할 수 없습니다.`);
                         return;
                     }
                 }
 
-                if (assignedDay && assignedTime) {
-                    // Skip validation if moving within the same Force (Avoid redundant alerts)
-                    if (sourceId && sourceId !== 'pool') {
-                        const sourceIdx = parties.findIndex(p => p.id === sourceId);
-                        if (Math.floor(sourceIdx / 2) === forceIdx) {
-                            executeMove(memberId, targetId);
+                // 2. Time Validation (Only for legion mode)
+                if (mode === 'legion') {
+                    // --- If Force Time is NOT set ---
+                    if (!assignedDay || !assignedTime) {
+                        // Handle Priority 
+                        if (selectedDay !== 'ALL' && selectedSlot) {
+                            executeMove(memberId, targetId, selectedDay, selectedSlot);
+                            return;
+                        }
+
+                        // Check if member actually has any availability to offer
+                        const hasAvailability = RAID_DAYS.some(day => (member.availability?.[day]?.length || 0) > 0);
+
+                        if (hasAvailability) {
+                            setTimeSelectionModal({
+                                isOpen: true,
+                                member,
+                                targetPartyId: targetId
+                            });
+                            return; // Stop default execution
+                        } else {
+                            // Minimalist feedback if member has 0 availability
+                            alert(`${member.name}님은 신청한 시간대가 없어 포스 시간을 자동 설정할 수 없습니다.`);
                             return;
                         }
                     }
 
-                    // 1. Fixed Group Smart Check: Check if duplicate owner
-                    if (member.fixedGroupId) {
-                        const isDuplicate = mode === 'fixed' 
-                            ? [...p1.members, ...(p2?.members || [])].some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id)
-                            : targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
+                    if (assignedDay && assignedTime) {
+                        // Skip validation if moving within the same Force
+                        if (sourceId && sourceId !== 'pool') {
+                            const sourceIdx = parties.findIndex(p => p.id === sourceId);
+                            if (Math.floor(sourceIdx / 2) === forceIdx) {
+                                executeMove(memberId, targetId);
+                                return;
+                            }
+                        }
 
-                        if (isDuplicate) {
-                            const scopeLabel = mode === 'fixed' ? '포스' : '파티';
+                        // Individual Availability Check
+                        if ((!member.availability?.[assignedDay]?.includes(assignedTime))) {
                             setConfirmationModal({
                                 isOpen: true,
                                 isDanger: true,
-                                message: `선택한 ${scopeLabel}에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                                message: (
+                                    <>
+                                        {member.name}님은 포스 시간인 {assignedDay}({getDayDate(assignedDay)}) {getSlotLabel(assignedTime)}에<br />
+                                        <span className="text-rose-500 font-bold">신청하지 않았습니다.</span><br /><br />
+                                        강제로 배정하시겠습니까?
+                                    </>
+                                ),
                                 onConfirm: () => {
                                     executeMove(memberId, targetId);
                                     setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1426,27 +1450,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             });
                             return;
                         }
-                    }
-
-                    // 2. Individual Availability Check (Existing Logic)
-                    if ((!member.availability?.[assignedDay]?.includes(assignedTime))) {
-                        setConfirmationModal({
-                            isOpen: true,
-                            isDanger: true,
-                            message: (
-                                <>
-                                    {member.name}님은 포스 시간인 {assignedDay}({getDayDate(assignedDay)}) {getSlotLabel(assignedTime)}에<br />
-                                    <span className="text-rose-500 font-bold">신청하지 않았습니다.</span><br /><br />
-                                    강제로 배정하시겠습니까?
-                                </>
-                            ),
-                            onConfirm: () => {
-                                executeMove(memberId, targetId);
-                                setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                            },
-                            onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
-                        });
-                        return;
                     }
                 }
             }
