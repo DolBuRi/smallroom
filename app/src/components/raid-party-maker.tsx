@@ -715,26 +715,54 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const membersRef = ref(db, dbPath.members);
             onValue(membersRef, (memberSnap) => {
                 const memberData = memberSnap.val();
-                const roster: Member[] = memberData ? Object.values(memberData).map((m: any) => ({
+                const rosterRaw: Member[] = memberData ? Object.values(memberData).map((m: any) => ({
                     id: m.id, name: m.name, class: m.class || '검성',
                     power: m.power || 0, score: m.score || 0, rank: m.rank || '',
-                    availability: m.availability,
-                    fixedGroupId: m.fixedGroupId
+                    availability: m.availability
                 })) : [];
-                setAllMembers(roster);
 
                 // 2. Load Sub-Characters
                 const subCharsRef = ref(db, dbPath.subCharacters);
                 onValue(subCharsRef, (subSnap) => {
                     const subData = subSnap.val();
-                    const subList: Member[] = subData ? Object.values(subData).map((m: any) => ({
+                    const subListRaw: Member[] = subData ? Object.values(subData).map((m: any) => ({
                         id: m.id, name: m.name, class: m.class || '검성',
                         power: m.power || 0, score: m.score || 0, rank: '',
                         ownerName: m.ownerName,
-                        isSub: true,
-                        fixedGroupId: roster.find(rm => rm.name === m.ownerName)?.fixedGroupId
+                        isSub: true
                     })) : [];
+
+                    // Derive dynamic fixedGroups based on subList ownerNames
+                    const groupedOwners = new Set<string>();
+                    subListRaw.forEach(s => {
+                        if (s.ownerName) groupedOwners.add(s.ownerName);
+                    });
+                    
+                    const roster = rosterRaw.map(m => ({
+                        ...m,
+                        fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
+                    }));
+
+                    const subList = subListRaw.map(m => ({
+                        ...m,
+                        fixedGroupId: m.ownerName
+                    }));
+
+                    setAllMembers(roster);
                     setAllSubChars(subList);
+
+                    // Update fixedGroups UI State for the modal
+                    const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
+                        const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
+                        const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                        return {
+                            id: ownerName,
+                            name: ownerName,
+                            color: colors[idx % colors.length],
+                            memberIds: groupMembers
+                        };
+                    });
+                    setFixedGroups(dynamicFixedGroups);
 
                     // 3. Load Attendance (Excluded Owners)
                     const attendanceRef = ref(db, dbPath.raidAttendance);
@@ -759,15 +787,17 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                     const appList = Object.values(appData) as any[];
                                     const applicantList: Member[] = appList.map(app => {
                                         const rosterMember = roster.find(m => m.name === app.nickname);
+                                        const subMember = subList.find(m => m.name === app.nickname);
+                                        const foundMember = rosterMember || subMember;
                                         return {
                                             id: app.id || app.nickname,
                                             name: app.nickname,
-                                            class: app.class || (rosterMember?.class) || '검성',
-                                            power: app.power || (rosterMember?.power) || 0,
-                                            score: rosterMember?.score || 0,
-                                            rank: rosterMember?.rank || '',
+                                            class: app.class || (foundMember?.class) || '검성',
+                                            power: app.power || (foundMember?.power) || 0,
+                                            score: foundMember?.score || 0,
+                                            rank: foundMember?.rank || '',
                                             availability: app.availability,
-                                            fixedGroupId: rosterMember?.fixedGroupId
+                                            fixedGroupId: foundMember?.fixedGroupId
                                         };
                                     });
                                     setApplications(applicantList);
@@ -2931,30 +2961,14 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                             </div>
                                         </button>
                                     ))}
-                                    <button
-                                        onClick={() => {
-                                            const newId = `fg-${Date.now()}`;
-                                            const newName = `${fixedGroups.length + 1}팀`;
-                                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500'];
-                                            const newColor = colors[fixedGroups.length % colors.length];
-
-                                            const newGroup: FixedGroup = {
-                                                id: newId,
-                                                name: newName,
-                                                color: newColor,
-                                                memberIds: []
-                                            };
-
-                                            setFixedGroups([...fixedGroups, newGroup]);
-                                            setSelectedFixedGroupId(newId);
-                                        }}
-                                        className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center justify-center gap-2 font-bold text-sm"
-                                    >
-                                        <Plus size={16} /> 새 팀 추가
-                                    </button>
+                                    {fixedGroups.length === 0 && (
+                                        <div className="text-center text-slate-400 text-sm py-4">
+                                            등록된 부캐 그룹이 없습니다.
+                                        </div>
+                                    )}
                                 </div>
 
-                                {/* Right: Member Editor */}
+                                {/* Right: Member View */}
                                 <div className="flex-1 p-6 flex flex-col bg-white dark:bg-slate-900">
                                     {selectedFixedGroupId ? (
                                         (() => {
@@ -2965,130 +2979,11 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <div className="flex flex-col h-full">
                                                     <div className="mb-4 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
                                                         <div className="flex items-center gap-2 flex-1">
-                                                            <button
-                                                                onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
-                                                                className={cn("w-4 h-4 rounded-full transition-transform hover:scale-125 focus:outline-none ring-2 ring-offset-2 ring-transparent focus:ring-indigo-500", selectedGroup?.color)}
-                                                                title="팀 색상 변경"
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={selectedGroup?.name}
-                                                                onChange={(e) => {
-                                                                    const newName = e.target.value;
-                                                                    setFixedGroups(fixedGroups.map(fg =>
-                                                                        fg.id === selectedFixedGroupId ? { ...fg, name: newName } : fg
-                                                                    ));
-                                                                }}
-                                                                className="font-bold text-lg bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-colors w-full"
-                                                                placeholder="팀 이름 입력"
-                                                            />
+                                                            <div className={cn("w-4 h-4 rounded-full", selectedGroup?.color)} />
+                                                            <h4 className="font-bold text-lg select-none">
+                                                                {selectedGroup?.name}
+                                                            </h4>
                                                         </div>
-                                                        <button
-                                                            onClick={() => {
-                                                                if (confirm(`'${selectedGroup?.name}' 팀을 삭제하시겠습니까?`)) {
-                                                                    setFixedGroups(fixedGroups.filter(fg => fg.id !== selectedFixedGroupId));
-                                                                    setSelectedFixedGroupId(null);
-                                                                }
-                                                            }}
-                                                            className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                                                            title="팀 삭제"
-                                                        >
-                                                            <Trash2 size={18} />
-                                                        </button>
-                                                    </div>
-
-                                                    {/* Color Picker (Toggled) */}
-                                                    {isColorPickerOpen && (
-                                                        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar animate-in slide-in-from-top-2 fade-in duration-200">
-                                                            {[
-                                                                'bg-slate-500', 'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
-                                                                'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500',
-                                                                'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500',
-                                                                'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500'
-                                                            ].map(color => (
-                                                                <button
-                                                                    key={color}
-                                                                    onClick={() => {
-                                                                        setFixedGroups(fixedGroups.map(fg =>
-                                                                            fg.id === selectedFixedGroupId ? { ...fg, color } : fg
-                                                                        ));
-                                                                        // Keep open for easy switching
-                                                                    }}
-                                                                    className={cn(
-                                                                        "w-8 h-8 rounded-full shrink-0 transition-all border-2",
-                                                                        color,
-                                                                        selectedGroup?.color === color ? "border-slate-600 dark:border-white scale-110 shadow-lg ring-2 ring-offset-2 ring-indigo-500" : "border-transparent opacity-70 hover:opacity-100 hover:scale-105"
-                                                                    )}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Add Member Input (Simple ID/Name Match for prototype) */}
-                                                    <div className="mb-4 flex gap-2">
-                                                        <input
-                                                            type="text"
-                                                            placeholder="캐릭터명 검색 (엔터로 추가)"
-                                                            className="flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') {
-                                                                    const val = e.currentTarget.value.trim();
-                                                                    if (!val) return;
-
-                                                                    // Simple logic: find member by name or ID
-                                                                    // In real app, this should be a proper search dropdown
-                                                                    const member = allMembers.find(m => m.name === val || m.id === val);
-                                                                    if (member) {
-                                                                        // 1. Check if already in THIS group
-                                                                        if (selectedGroup?.memberIds.includes(member.id) || selectedGroup?.memberIds.includes(member.name)) {
-                                                                            alert("이미 이 팀에 추가된 멤버입니다.");
-                                                                            e.currentTarget.value = '';
-                                                                            return;
-                                                                        }
-
-                                                                        // 2. Check if already in ANOTHER group
-                                                                        const otherGroup = fixedGroups.find(fg => fg.id !== selectedFixedGroupId && fg.memberIds.includes(member.id) || fg.memberIds.includes(member.name));
-
-                                                                        if (otherGroup) {
-                                                                            // Custom Modal for confirmation
-                                                                            setConfirmationModal({
-                                                                                isOpen: true,
-                                                                                message: `'${member.name}'님은 이미 '${otherGroup.name}'에 속해있습니다.\n\n'${selectedGroup?.name}'(으)로 이동하시겠습니까?`,
-                                                                                onConfirm: () => {
-                                                                                    setFixedGroups(prev => prev.map(fg => {
-                                                                                        if (fg.id === otherGroup.id) {
-                                                                                            return { ...fg, memberIds: fg.memberIds.filter(id => id !== member.id && id !== member.name) };
-                                                                                        }
-                                                                                        if (fg.id === selectedFixedGroupId) {
-                                                                                            return { ...fg, memberIds: [...fg.memberIds, member.name] };
-                                                                                        }
-                                                                                        return fg;
-                                                                                    }));
-                                                                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                                                                },
-                                                                                onCancel: () => {
-                                                                                    setConfirmationModal(prev => ({ ...prev, isOpen: false }));
-                                                                                }
-                                                                            });
-                                                                            // Note: Input clearing in async flow is tricky, keeping logic simple or clearing immediately if desired.
-                                                                            // Original logic cleared it inside confirm block. Here we clear it in onConfirm or immediately?
-                                                                            // Should clear immediately to avoid confusion, or handle it via state.
-                                                                            // For now, let's clear it immediately as it's cleaner for "pending action".
-                                                                            e.currentTarget.value = '';
-                                                                        } else {
-                                                                            // 3. Just Add
-                                                                            setFixedGroups(fixedGroups.map(fg =>
-                                                                                fg.id === selectedFixedGroupId
-                                                                                    ? { ...fg, memberIds: [...fg.memberIds, member.name] }
-                                                                                    : fg
-                                                                            ));
-                                                                            e.currentTarget.value = '';
-                                                                        }
-                                                                    } else {
-                                                                    }
-                                                                }
-                                                            }}
-                                                        />
                                                     </div>
 
                                                     {/* Member List */}
@@ -3108,25 +3003,15 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                                     <div className={cn("w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white", getClassColor(member.class))}>
                                                                                         {member.class[0]}
                                                                                     </div>
-                                                                                    <span className="font-bold text-sm">{member.name}</span>
+                                                                                    <span className="font-bold text-sm">
+                                                                                        {member.name}
+                                                                                        {member.name === selectedGroup.id && <span className="ml-2 text-xs text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded font-black">본캐</span>}
+                                                                                    </span>
                                                                                 </>
                                                                             ) : (
                                                                                 <span className="text-slate-400 text-sm">Unknown ({mid})</span>
                                                                             )}
                                                                         </div>
-                                                                        <button
-                                                                            onClick={() => {
-                                                                                const newGroups = fixedGroups.map(fg =>
-                                                                                    fg.id === selectedFixedGroupId
-                                                                                        ? { ...fg, memberIds: fg.memberIds.filter(id => id !== mid) }
-                                                                                        : fg
-                                                                                );
-                                                                                setFixedGroups(newGroups);
-                                                                            }}
-                                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
-                                                                        >
-                                                                            <Trash2 size={14} />
-                                                                        </button>
                                                                     </div>
                                                                 );
                                                             })
