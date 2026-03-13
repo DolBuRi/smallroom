@@ -7,23 +7,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // 1. 요청 수신
     if (request.type === 'AONI_SEARCH_REQUEST') {
-        const { name, server } = request;
-        console.log(`[Background] 작업 시작: ${name}`);
+        const { name, server, serverId, raceId } = request;
+        console.log(`[Background] 작업 시작: ${name} (Server: ${server}/${serverId})`);
         activeCallback = sendResponse;
 
         const serverMap = {
             '아리엘': '1006', '이스라펠': '2001', '시엘': '1001',
             '네자칸': '1002', '지켈': '2002', '트리니엘': '2003', '바이젤': '1003'
         };
-        const sId = serverMap[server] || '1006';
-        const rId = '1'; // 천족
+        
+        // Priority: serverId (passed) > serverMap (hardcoded) > default (1006)
+        const sId = serverId || serverMap[server] || '1006';
+        
+        // Priority: raceId (passed) > faction (passed) > default (1: Elyos)
+        let rId = '1';
+        if (raceId) {
+            rId = raceId;
+        } else if (request.faction === '마족') {
+            rId = '2';
+        } else if (request.faction === '천족') {
+            rId = '1';
+        }
 
-        const params = `?q=${encodeURIComponent(name)}&page=0&raceId=${rId}&serverId=${sId}&auto_scrape=true`;
+        const params = `?q=${encodeURIComponent(name)}&serverId=${sId}&raceId=${rId}&auto_scrape=true`;
 
-        // [변경] 사용자 편의: 화면 밖으로 창을 이동시켜서 완벽하게 숨김 (Invisible Mode)
-        // [변경] 오프스크린 렌더링 불가 문제 해결 -> 최소화 모드로 복귀
         chrome.windows.create({
-            url: `https://aon2.info/character/search${params}`,
+            url: `https://aion2tool.com/${params}`,
             type: 'popup',
             state: 'minimized',
             focused: false

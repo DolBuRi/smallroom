@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 // --- Interfaces ---
 interface RaidApplication {
@@ -115,6 +116,7 @@ const MemberCard = ({ member, compact = false }: { member: RaidApplication, comp
 
 export default function RaidManager() {
     const { isAdmin } = useAuth();
+    const { mode, dbPath } = useAppMode();
 
     // Data States
     const [applications, setApplications] = useState<RaidApplication[]>([]);
@@ -132,18 +134,18 @@ export default function RaidManager() {
 
     // Initial Data Sync
     useEffect(() => {
-        const unsubscribeApps = onValue(ref(db, 'raid_applications'), (snapshot) => {
+        const unsubscribeApps = onValue(ref(db, dbPath.raidApplications), (snapshot) => {
             const data = snapshot.val();
             setApplications(data ? Object.values(data) : []);
             setIsLoading(false);
         });
 
-        const unsubscribeForces = onValue(ref(db, 'raid_matched_forces'), (snapshot) => {
+        const unsubscribeForces = onValue(ref(db, dbPath.raidMatchedForces), (snapshot) => {
             const data = snapshot.val();
             setMatchedForces(data || []);
         });
 
-        const unsubscribeUnassigned = onValue(ref(db, 'raid_unassigned_members'), (snapshot) => {
+        const unsubscribeUnassigned = onValue(ref(db, dbPath.raidUnassignedMembers), (snapshot) => {
             const data = snapshot.val();
             setUnassignedMembers(data || []);
         });
@@ -153,7 +155,7 @@ export default function RaidManager() {
             unsubscribeUnassigned();
             unsubscribeForces();
         };
-    }, []);
+    }, [dbPath]); // Add dbPath to dependencies
 
     // Derived Data
     const isWeekend = ['토', '일'].includes(selectedDay);
@@ -297,8 +299,8 @@ export default function RaidManager() {
         // Skip Confirmation as requested
         // 6. Finalize
         const leftovers = applications.filter(app => !assignedIds.has(app.id));
-        set(ref(db, 'raid_matched_forces'), tempForces);
-        set(ref(db, 'raid_unassigned_members'), leftovers);
+        set(ref(db, dbPath.raidMatchedForces), tempForces);
+        set(ref(db, dbPath.raidUnassignedMembers), leftovers);
         setSelectedDay('전체');
         setViewMode('matching');
     };
@@ -308,9 +310,9 @@ export default function RaidManager() {
         if (!confirm("모든 신청 및 매칭 데이터를 초기화하시겠습니까?\n(매주 수요일 리셋 권장)")) return;
 
         try {
-            await remove(ref(db, 'raid_applications'));
-            await remove(ref(db, 'raid_matched_forces'));
-            await remove(ref(db, 'raid_unassigned_members'));
+            await remove(ref(db, dbPath.raidApplications));
+            await remove(ref(db, dbPath.raidMatchedForces));
+            await remove(ref(db, dbPath.raidUnassignedMembers));
             alert("전체 초기화 완료");
         } catch (e) {
             console.error(e);

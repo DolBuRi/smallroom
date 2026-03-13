@@ -32,9 +32,7 @@ async function getBrowser() {
                 '--disable-setuid-sandbox',
                 '--window-size=1920,1080',
                 '--disable-gpu',
-                '--disable-dev-shm-usage',
-                '--no-first-run',
-                '--no-zygote'
+                '--disable-dev-shm-usage'
             ]
         });
     }
@@ -60,60 +58,41 @@ async function scrapeCharacter(nickname, serverId = 1006) {
         try {
             const browser = await getBrowser();
             page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1920, height: 1080 });
 
-            // 리소스 차단
+            // 리소스 차단 (CSS는 렌더링에 필요할 수 있으므로 제외)
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                if (['image', 'media', 'font', 'stylesheet'].includes(req.resourceType())) {
+                if (['image', 'media', 'font'].includes(req.resourceType())) {
                     req.abort();
                 } else {
                     req.continue();
                 }
             });
 
-            await page.goto('https://aion2tool.com', { waitUntil: 'domcontentloaded' });
+            // 직접 URL로 이동 (더 빠르고 정확함)
+            const targetUrl = `https://aion2tool.com/char/serverid=${serverId}/${encodeURIComponent(nickname)}`;
+            console.log(`[이동] ${targetUrl}`);
+            
+            await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
-            // 종족 선택
-            try {
-                const raceSelector = parseInt(serverId) >= 2000 ? '#race-asmodian' : '#race-elyos';
-                await page.waitForSelector(raceSelector, { timeout: 3000 });
-                await page.click(raceSelector);
-                console.log(`[종족] ${parseInt(serverId) >= 2000 ? '마족' : '천족'} 선택 완료`);
-            } catch (e) {
-                console.log(`[주의] 종족 선택 실패 또는 이미 선택됨: ${e.message}`);
-            }
-
-            // 서버 선택
-            try {
-                await page.waitForSelector('#server-select', { timeout: 3000 });
-                await page.select('#server-select', String(serverId));
-                console.log(`[서버] ID: ${serverId} 선택 완료`);
-            } catch (e) {
-                console.log(`[주의] 서버 선택 실패: ${e.message}`);
-            }
-
-            // 검색어 입력
-            const inputSelector = 'input[placeholder="캐릭터 닉네임 입력"]';
-            await page.waitForSelector(inputSelector);
-            await page.type(inputSelector, nickname);
-            await new Promise(r => setTimeout(r, 300));
-            await page.keyboard.press('Enter');
-
-            // 로딩 대기
+            // 데이터 로드 확인
             try {
                 await page.waitForFunction(
                     () => {
                         const notFound = document.body.innerText.includes("검색어에 해당하는");
-                        if (notFound) return true;
+                        const errorMsg = document.body.innerText.includes("Internal Server Error");
+                        if (notFound || errorMsg) return true;
+                        
                         const powerEl = document.querySelector('#result-combat-power');
                         const scoreEl = document.querySelector('#dps-score-value');
                         return (powerEl && /\d/.test(powerEl.innerText)) && (scoreEl && /\d/.test(scoreEl.innerText));
                     },
-                    { timeout: 45000 }
+                    { timeout: 20000 }
                 );
             } catch (e) {
-                console.log("⚠️ 로딩 타임아웃 (부분 데이터 가능성)");
+                console.log("⚠️ 데이터 로드 지연 (대기 중...)");
             }
 
             // 데이터 추출
@@ -208,116 +187,118 @@ app.post('/scrape', async (req, res) => {
 });
 
 // Cron Job: 매 시간 50분에 기상 -> 인원수 계산 후 대기 -> 59분 도착 목표 [Dynamic Scheduling]
-cron.schedule('50 * * * *', async () => {
+// --- 스케줄러 유틸리티 ---
+async function runBatchScrape(taskName, paths, timestampPath) {
     const now = new Date();
     console.log(`========================================`);
-    console.log(`⏰ [WakeUp] 스케줄러 기상 (${now.toLocaleString()})`);
+    console.log(`⏰ [${taskName}] 스케줄러 기상 (${now.toLocaleString()})`);
 
     try {
-        const snapshot = await db.ref('members').once('value');
-        const members = snapshot.val();
-        if (!members) {
-            console.log("멤버 데이터가 없습니다.");
+        // 1. 모든 대상 데이터 수집
+        const snapshots = await Promise.all(paths.map(p => db.ref(p).once('value')));
+        const datasets = snapshots.map(s => s.val() || {});
+        
+        // 2. 고유 닉네임 목록 생성 (중복 제거로 아툴 요청 최소화)
+        const nameMap = new Map(); // name -> {server, indices: [{path, index}]}
+        
+        paths.forEach((path, pathIdx) => {
+            const data = datasets[pathIdx];
+            const list = Array.isArray(data) ? data : Object.values(data);
+            list.forEach((m, idx) => {
+                if (m && m.name) {
+                    if (!nameMap.has(m.name)) {
+                        nameMap.set(m.name, { 
+                            name: m.name, 
+                            server: m.server || '아리엘',
+                            serverId: (SERVER_LIST.find(s => s.name === (m.server || '아리엘'))?.id || '1006'),
+                            targets: [] 
+                        });
+                    }
+                    nameMap.get(m.name).targets.push({ path, index: Array.isArray(data) ? idx : Object.keys(data)[idx] });
+                }
+            });
+        });
+
+        const uniqueNames = Array.from(nameMap.values());
+        if (uniqueNames.length === 0) {
+            console.log(`[${taskName}] 대상 데이터가 없습니다.`);
             return;
         }
 
-        const memberList = Array.isArray(members) ? members : Object.values(members);
+        console.log(`📊 대상: ${uniqueNames.length}명 (중복 제거됨) | 원본 합계: ${paths.reduce((acc, _, i) => acc + Object.keys(datasets[i]).length, 0)}명`);
 
-        // [Dynamic Wait Logic]
-        // 목표: 59분 00초에 끝내기
-        // 계산: (인원수 / 3) * 8초 (여유 있게 3초 컷 + 4초 딜레이 + 1초 마진)
-        const BATCH_SIZE = 3;
-        const SEC_PER_BATCH = 8;
-        const totalBatches = Math.ceil(memberList.length / BATCH_SIZE);
-        const estDurationMs = totalBatches * SEC_PER_BATCH * 1000;
-
-        const targetEndTime = new Date(now);
-        targetEndTime.setMinutes(59, 0, 0); // xx시 59분 00초 목표
-
-        const optimalStartTime = new Date(targetEndTime.getTime() - estDurationMs);
-        const waitTimeMs = optimalStartTime.getTime() - now.getTime();
-
-        console.log(`📊 인원: ${memberList.length}명 | 예상 소요: ${estDurationMs / 1000}초`);
-        console.log(`🎯 목표 종료: ${targetEndTime.toLocaleTimeString()} | 최적 시작: ${optimalStartTime.toLocaleTimeString()}`);
-
-        if (waitTimeMs > 0) {
-            console.log(`⏳ [Wait] ${waitTimeMs / 1000}초 대기 후 시작합니다...`);
-            await new Promise(r => setTimeout(r, waitTimeMs));
-        } else {
-            console.log(`⚡ [Immediate] 시간이 촉박하여 즉시 시작합니다!`);
-        }
-
-        console.log(`🚀 [Start] 크롤링 시작 (${new Date().toLocaleTimeString()})`);
-
+        // 3. 순차 처리 (Safe Mode - 저사양 배려)
+        const CONCURRENT_LIMIT = 2; // 동시 창 2개로 제한 루프
+        const DELAY_MS = 5000;      // 요청 간 5초 여유
         let successCount = 0;
 
-        // [Parallel Optimization] 3 concurrent requests
-        const CONCURRENT_LIMIT = 3;
-        const DELAY_MS = 4000; // 4 seconds delay (Safe mode)
-
-        // Helper to process a chunk
-        const processMember = async (member, index) => {
-            if (!member || !member.name) return false;
-
-            console.log(`[Auto] ${index + 1}/${memberList.length}: ${member.name} 갱신 중...`);
-
-            try {
-                const res = await scrapeCharacter(member.name);
-                if (res.success && res.data) {
-                    await db.ref(`members/${index}`).update({
-                        power: res.data.power,
-                        score: res.data.score,
-                        class: res.data.class,
-                        guild: res.data.guild,
-                        isActive: (res.data.guild === '츄'),
-                        lastUpdated: new Date().toISOString()
-                    });
-                    return true;
+        for (let i = 0; i < uniqueNames.length; i += CONCURRENT_LIMIT) {
+            const chunk = uniqueNames.slice(i, i + CONCURRENT_LIMIT);
+            const promises = chunk.map(async (item) => {
+                console.log(`[Auto] ${item.name} (${item.server}) 갱신 중...`);
+                try {
+                    const res = await scrapeCharacter(item.name, item.serverId);
+                    if (res.success && res.data) {
+                        // 모든 관련 경로에 업데이트
+                        const updatePromises = item.targets.map(t => 
+                            db.ref(`${t.path}/${t.index}`).update({
+                                power: res.data.power,
+                                score: res.data.score,
+                                class: res.data.class,
+                                guild: res.data.guild,
+                                isActive: (res.data.guild === '츄'),
+                                lastUpdated: new Date().toISOString()
+                            })
+                        );
+                        await Promise.all(updatePromises);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error(`❌ [Auto] ${item.name} 실패: ${e.message}`);
                 }
-            } catch (e) {
-                console.error(`❌ [Auto] ${member.name} 실패: ${e.message}`);
-            }
-            return false;
-        };
-
-        // Chunk processing loop
-        for (let i = 0; i < memberList.length; i += CONCURRENT_LIMIT) {
-            const chunk = memberList.slice(i, i + CONCURRENT_LIMIT);
-            const promises = chunk.map((member, chunkIdx) =>
-                processMember(member, i + chunkIdx)
-            );
+                return false;
+            });
 
             const results = await Promise.all(promises);
             successCount += results.filter(r => r).length;
 
-            // Delay between chunks (not after the last one)
-            if (i + CONCURRENT_LIMIT < memberList.length) {
+            if (i + CONCURRENT_LIMIT < uniqueNames.length) {
                 await new Promise(r => setTimeout(r, DELAY_MS));
             }
         }
 
-        // [New] Update Last Full Refresh Timestamp
-        await db.ref('metadata/lastFullRefresh').set(new Date().toISOString());
-
-        // [New] Save Snapshot for the day
-        const todayStr = new Date().toISOString().split('T')[0];
-        const latestMembers = (await db.ref('members').once('value')).val();
-        if (latestMembers) {
-            // Store as object mapping for faster lookups in dashboard
-            const memberList = Array.isArray(latestMembers) ? latestMembers : Object.values(latestMembers);
-            const snapshotMap = memberList.reduce((acc, m) => {
-                if (m && m.id) acc[m.id] = m;
-                return acc;
-            }, {});
-            await db.ref(`snapshots/${todayStr}`).set(snapshotMap);
-            console.log(`📸 [Snapshot] ${todayStr} 저장 완료`);
+        // 4. 타임스탬프 업데이트
+        if (Array.isArray(timestampPath)) {
+            await Promise.all(timestampPath.map(tp => db.ref(tp).set(new Date().toISOString())));
+        } else {
+            await db.ref(timestampPath).set(new Date().toISOString());
         }
 
-        console.log(`✅ [Auto-Refresh] 갱신 완료! (성공: ${successCount}/${memberList.length})`);
+        console.log(`✅ [${taskName}] 갱신 완료! (성공: ${successCount}/${uniqueNames.length})`);
 
     } catch (e) {
-        console.error(`❌ [Auto-Refresh] 에러 발생:`, e);
+        console.error(`❌ [${taskName}] 에러 발생:`, e);
     }
+}
+
+// [스케줄 1] 메인 캐릭터 통합 (매 시간 50분)
+// 레기온 멤버 + 고정 파티 멤버 함께 처리 (중복 제거)
+cron.schedule('50 * * * *', () => {
+    runBatchScrape(
+        'Main-Integrate', 
+        ['members', 'fixed_members'], 
+        ['metadata/lastFullRefresh', 'metadata/fixed_members_lastRefresh']
+    );
+});
+
+// [스케줄 2] 고정 파티 부캐릭터 (매 시간 10분)
+// 부하 분산을 위해 본체 갱신이 없는 시간대에 실행
+cron.schedule('10 * * * *', () => {
+    runBatchScrape(
+        'Sub-Routine', 
+        ['fixed_sub_characters'], 
+        'metadata/fixed_subChars_lastRefresh'
+    );
 });
 
 app.listen(PORT, () => {

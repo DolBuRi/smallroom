@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bell, Link, Check, X, Loader2, Signal, Volume2, RefreshCw, PlayCircle, Wrench } from 'lucide-react';
 import { ref, get, child } from 'firebase/database';
 import { cn } from '@/lib/utils';
+import { useAppMode } from '@/context/ModeContext';
 import { alerterDb } from '@/lib/firebase'; // Use the secondary DB
 
 interface AlerterSettings {
@@ -26,6 +27,7 @@ const RIFT_TIMES = [2, 5, 8, 11, 14, 17, 20, 23];
 const SHUGO_MINUTES = [15, 45]; // Every hour at xx:15, xx:45
 
 export default function AlerterIntegration({ showDiagnostics = false }: { showDiagnostics?: boolean }) {
+    const { mode, dbPath } = useAppMode();
     const [syncKey, setSyncKey] = useState('');
     const [isConnected, setIsConnected] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -397,9 +399,10 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
     };
 
     useEffect(() => {
-        const savedKey = localStorage.getItem('aion2_alerter_sync_key');
-        const localSettings = localStorage.getItem('aion2_alerter_local_settings');
-        const savedClockOffset = localStorage.getItem('aion2_alerter_clock_offset');
+        const keySuffix = mode === 'fixed' ? '_fixed' : '';
+        const savedKey = localStorage.getItem(`aion2_alerter_sync_key${keySuffix}`);
+        const localSettings = localStorage.getItem(`aion2_alerter_local_settings${keySuffix}`);
+        const savedClockOffset = localStorage.getItem(`aion2_alerter_clock_offset${keySuffix}`);
         if (savedClockOffset) {
             const parsed = parseFloat(savedClockOffset);
             if (!isNaN(parsed)) setManualClockOffset(parsed);
@@ -514,8 +517,9 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
 
     // Wrapper to update state AND save to local storage
     const updateSettings = (newSettings: AlerterSettings) => {
+        const keySuffix = mode === 'fixed' ? '_fixed' : '';
         setSettings(newSettings);
-        localStorage.setItem('aion2_alerter_local_settings', JSON.stringify(newSettings));
+        localStorage.setItem(`aion2_alerter_local_settings${keySuffix}`, JSON.stringify(newSettings));
     };
 
     const handleSync = async (keyInput: string = syncKey, isAuto = false) => {
@@ -539,9 +543,10 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
                 const data = snapshot.val();
                 data.lastSync = new Date().toLocaleString('ko-KR');
                 // When syncing from cloud, we update local storage too (Reset)
+                const keySuffix = mode === 'fixed' ? '_fixed' : '';
                 updateSettings(data);
                 setIsConnected(true);
-                localStorage.setItem('aion2_alerter_sync_key', key);
+                localStorage.setItem(`aion2_alerter_sync_key${keySuffix}`, key);
                 if (!isAuto) alert('연동 성공! 설정을 불러왔습니다.');
             } else {
                 if (!isAuto) setError('유효하지 않은 키입니다. 다시 확인해주세요.');
@@ -558,8 +563,9 @@ export default function AlerterIntegration({ showDiagnostics = false }: { showDi
 
     const handleDisconnect = () => {
         if (confirm('연동을 해제하시겠습니까?')) {
-            localStorage.removeItem('aion2_alerter_sync_key');
-            localStorage.removeItem('aion2_alerter_local_settings'); // Clear local settings too
+            const keySuffix = mode === 'fixed' ? '_fixed' : '';
+            localStorage.removeItem(`aion2_alerter_sync_key${keySuffix}`);
+            localStorage.removeItem(`aion2_alerter_local_settings${keySuffix}`); // Clear local settings too
             setSyncKey('');
             setIsConnected(false);
             setSettings(null);

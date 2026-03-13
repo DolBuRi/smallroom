@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, Users, UserCheck, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Shield } from 'lucide-react';
-import { cn, formatRelativeTime } from '@/lib/utils';
+import { RefreshCw, Search, Plus, Trash2, X, Loader2, Shield, Zap, Trophy, Award } from 'lucide-react';
+import { cn, formatRelativeTime, getClassColor, getJobShortName } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { ref, onValue, set } from 'firebase/database';
+import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { GuildMember as BaseGuildMember } from './member-list';
 
@@ -223,12 +223,18 @@ export default function StaticPartyList() {
         }
     };
 
+    const [sortBy, setSortBy] = useState<'power' | 'score'>('power');
+
     const sortedMembers = useMemo(() => {
-        return [...members].sort((a, b) => b.power - a.power);
-    }, [members]);
+        return [...members].sort((a, b) => {
+            if (sortBy === 'power') return b.power - a.power;
+            return (b.score || 0) - (a.score || 0);
+        });
+    }, [members, sortBy]);
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-700 min-w-[1050px] pb-20">
+        <div className="space-y-8 animate-in fade-in duration-700 pb-20">
+            {/* Header */}
             <div className="flex justify-between items-end gap-6">
                 <div>
                     <div className="flex items-center gap-2 mb-2">
@@ -265,74 +271,114 @@ export default function StaticPartyList() {
                 </div>
             </div>
 
-            <div className="glass-panel overflow-hidden relative border border-slate-200 dark:border-slate-800 rounded-[2rem] bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl">
-                {isBatchRunning && (
-                    <div className="absolute top-0 left-0 w-full h-1 z-50">
-                        <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
-                    </div>
-                )}
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-500 dark:text-slate-300 border-collapse">
-                        <thead className="bg-slate-50/50 dark:bg-slate-800/50 text-slate-400 uppercase font-black tracking-widest text-[11px] border-b border-slate-100 dark:border-slate-700">
-                            <tr>
-                                <th className="w-16 px-4 py-5 text-center">선택</th>
-                                <th className="px-5 py-5">닉네임</th>
-                                <th className="px-5 py-5 text-center">서버</th>
-                                <th className="px-5 py-5 text-center">직업</th>
-                                <th className="px-5 py-5 text-center">전투력</th>
-                                <th className="px-5 py-5 text-center">점수</th>
-                                <th className="px-5 py-5 text-center">소속 레기온</th>
-                                <th className="px-5 py-5 text-center">메모</th>
-                                <th className="px-5 py-5 text-center">최근 갱신</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                            {sortedMembers.length === 0 ? (
-                                <tr>
-                                    <td colSpan={9} className="text-center py-24 text-slate-400 font-medium">
-                                        리스트가 비어있습니다. 사람을 추가해보세요.
-                                    </td>
-                                </tr>
-                            ) : (
-                                sortedMembers.map(m => (
-                                    <tr key={m.id} className={cn("transition-all duration-200 hover:bg-slate-50/50 dark:hover:bg-slate-800/50", selectedIds.includes(m.id) && "bg-amber-50/30 dark:bg-amber-900/10")}>
-                                        <td className="px-4 py-5 text-center">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedIds.includes(m.id)}
-                                                onChange={() => setSelectedIds(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
-                                                className="w-4 h-4 rounded border-slate-300 text-indigo-500 focus:ring-indigo-500"
-                                            />
-                                        </td>
-                                        <td className="px-5 py-5 font-black text-slate-800 dark:text-slate-100">{m.name}</td>
-                                        <td className="px-5 py-5 text-center text-xs font-bold text-slate-400">
-                                            {/* @ts-ignore */}
-                                            {m.serverName || '아리엘'}
-                                        </td>
-                                        <td className="px-5 py-5 text-center font-bold">{m.class}</td>
-                                        <td className="px-5 py-5 text-center font-black text-indigo-600 dark:text-indigo-400">{m.power.toLocaleString()}</td>
-                                        <td className="px-5 py-5 text-center font-bold text-amber-500">{(m.score || 0).toLocaleString()}</td>
-                                        <td className="px-5 py-5 text-center text-xs font-semibold text-slate-500">{m.guild}</td>
-                                        <td className="px-5 py-5 text-center">
-                                            <input
-                                                type="text"
-                                                placeholder="-"
-                                                value={m.specialNotes || ''}
-                                                onChange={(e) => updateMembers(members.map(curr => curr.id === m.id ? { ...curr, specialNotes: e.target.value } : curr))}
-                                                className="bg-transparent border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 outline-none text-[11px] text-center w-full max-w-[120px]"
-                                            />
-                                        </td>
-                                        <td className="px-5 py-5 text-center text-[10px] text-slate-400">
-                                            {m.lastUpdated ? formatRelativeTime(m.lastUpdated) : '-'}
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+            {/* Sort Controls */}
+            <div className="flex items-center gap-2 bg-white/50 dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 w-fit">
+                <button
+                    onClick={() => setSortBy('power')}
+                    className={cn(
+                        "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
+                        sortBy === 'power'
+                            ? "bg-indigo-50 dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm ring-1 ring-indigo-100 dark:ring-0"
+                            : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
+                    )}
+                >
+                    <Zap size={12} /> 전투력 순
+                </button>
+                <button
+                    onClick={() => setSortBy('score')}
+                    className={cn(
+                        "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
+                        sortBy === 'score'
+                            ? "bg-amber-50 dark:bg-amber-600 text-amber-600 dark:text-white shadow-sm ring-1 ring-amber-100 dark:ring-0"
+                            : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
+                    )}
+                >
+                    <Trophy size={12} /> 아툴 점수 순
+                </button>
             </div>
+
+            {/* Progress Bar */}
+            {isBatchRunning && (
+                <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
+                </div>
+            )}
+
+            {/* Ranking Cards */}
+            {isLoadingData ? (
+                <div className="flex flex-col justify-center items-center h-60 text-slate-400 gap-4">
+                    <Loader2 className="animate-spin text-amber-500" size={40} />
+                    <p className="font-bold">데이터를 불러오는 중...</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 gap-4">
+                    {sortedMembers.length === 0 ? (
+                        <div className="text-center py-24 glass-panel text-slate-300 font-bold">
+                            리스트가 비어있습니다. 인원 추가 버튼으로 추가해보세요.
+                        </div>
+                    ) : sortedMembers.map((m, idx) => (
+                        <div
+                            key={m.id}
+                            onClick={() => setSelectedIds(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id])}
+                            className={cn(
+                                "glass-panel p-6 flex items-center gap-6 hover:border-amber-200 dark:hover:border-amber-700 hover:shadow-xl hover:shadow-amber-50/50 dark:hover:shadow-amber-900/10 transition-all group relative overflow-hidden cursor-pointer",
+                                selectedIds.includes(m.id) && "border-amber-400 dark:border-amber-600 bg-amber-50/30 dark:bg-amber-900/10"
+                            )}
+                        >
+                            {idx < 3 && (
+                                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                                    <Award size={80} className={cn(idx === 0 ? "text-amber-500" : idx === 1 ? "text-slate-400" : "text-amber-700")} />
+                                </div>
+                            )}
+
+                            {/* Rank Badge */}
+                            <div className={cn(
+                                "w-12 h-12 flex items-center justify-center rounded-2xl font-black text-xl shadow-inner transition-transform group-hover:scale-110",
+                                idx === 0 ? "bg-amber-100 dark:bg-amber-500 text-amber-600 dark:text-white shadow-amber-200/50 shadow-lg" :
+                                    idx === 1 ? "bg-slate-100 dark:bg-slate-500 text-slate-500 dark:text-white shadow-slate-200/50 shadow-lg" :
+                                        idx === 2 ? "bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-white shadow-orange-200/50 shadow-lg" :
+                                            "bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-300"
+                            )}>
+                                {idx + 1}
+                            </div>
+
+                            {/* Name & Info */}
+                            <div className="flex-1">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-2xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{m.name}</span>
+                                    <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-100 dark:border-slate-700">
+                                        <div className={cn("w-5 h-5 rounded-md flex items-center justify-center font-black text-[9px] shadow-sm shrink-0", getClassColor(m.class))}>
+                                            {getJobShortName(m.class)}
+                                        </div>
+                                        <span className="text-slate-400 dark:text-indigo-200 text-[10px] font-black tracking-widest uppercase">{m.class}</span>
+                                    </div>
+                                    {/* @ts-ignore */}
+                                    <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-md font-black border border-amber-100 dark:border-amber-900/30">{(m as any).serverName || '아리엘'}</span>
+                                </div>
+                                {(m as any).specialNotes && (
+                                    <p className="text-xs text-slate-400 mt-1 font-medium">{(m as any).specialNotes}</p>
+                                )}
+                            </div>
+
+                            {/* Stats */}
+                            <div className="text-right flex items-center gap-8">
+                                <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'power' ? "opacity-100 scale-100" : "opacity-60 scale-95")}>
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">Combat Power</span>
+                                    <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'power' ? "text-3xl text-indigo-500" : "text-xl text-slate-500 dark:text-slate-300")}>
+                                        {m.power.toLocaleString()}
+                                    </span>
+                                </div>
+                                <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'score' ? "opacity-100 scale-100" : "opacity-60 scale-95")}>
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">AT Score</span>
+                                    <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'score' ? "text-3xl text-amber-500" : "text-xl text-slate-500 dark:text-slate-300")}>
+                                        {(m.score || 0).toLocaleString()}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Modal */}
             {isModalOpen && (

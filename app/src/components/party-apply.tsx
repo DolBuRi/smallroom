@@ -57,6 +57,7 @@ const getCycleDate = (targetDayName: string) => {
 };
 
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 // --- Main Component ---
 
@@ -74,6 +75,7 @@ export default function PartyApply({
     forceSingleColumn?: boolean
 }) {
     const { isAdmin } = useAuth();
+    const { dbPath } = useAppMode();
     const [nickname, setNickname] = useState('');
     const [availability, setAvailability] = useState<Record<string, string[]>>({
         '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': []
@@ -97,15 +99,16 @@ export default function PartyApply({
         }
 
         // Load Members
-        const membersRef = ref(db, 'members');
+        const membersRef = ref(db, dbPath.members);
         const unsubMembers = onValue(membersRef, (snap) => {
             const data = snap.val();
             setMembers(data ? Object.values(data) : []);
         });
 
-        // Load Applications to check for existing
-        const appsRef = ref(db, 'raid_applications');
-        const unsubApps = onValue(appsRef, (snap) => {
+        // Load Applications
+        // Load Existing Applies
+        const appliesRef = ref(db, dbPath.raidApplications);
+        const unsubApps = onValue(appliesRef, (snap) => {
             const data = snap.val();
             if (data) {
                 const apps = Object.keys(data).map(key => ({ ...data[key], id: key }));
@@ -155,7 +158,7 @@ export default function PartyApply({
 
     const triggerSheetSync = async () => {
         // 여기에 복사한 웹 앱 URL을 넣으세요.
-        const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzM6EaqC4B298x6B4OAp4_Ng6FsyDn1jVoVvEGN7d7zR5APYBzGYeVWxDGEn2vHtYjE/exec";
+        const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzM6EaqC4B298x6B4OAp_Ng6FsyDn1jVoVvEGN7d7zR5APYBzGYeVWxDGEn2vHtYjE/exec";
         if (GAS_WEBAPP_URL.includes("여기에")) return;
 
         try {
@@ -204,9 +207,9 @@ export default function PartyApply({
                     alert('관리자 권한이 필요합니다.\n(신청 내역 수정/삭제는 임원진에게 연락 부탁드리겠습니다)');
                     return;
                 }
-                await set(ref(db, `raid_applications/${existing.id}`), { ...applicationData, id: existing.id });
+                await set(ref(db, `${dbPath.raidApplications}/${existing.id}`), { ...applicationData, id: existing.id });
             } else {
-                const newRef = push(ref(db, 'raid_applications'));
+                const newRef = push(ref(db, dbPath.raidApplications));
                 await set(newRef, { ...applicationData, id: newRef.key });
             }
 
@@ -240,7 +243,7 @@ export default function PartyApply({
         try {
             const existing = existingApps.find(a => a.nickname === trimmedName);
             if (existing) {
-                await remove(ref(db, `raid_applications/${existing.id}`));
+                await remove(ref(db, `${dbPath.raidApplications}/${existing.id}`));
                 alert('신청 정보가 삭제되었습니다.');
                 setAvailability({
                     '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': []

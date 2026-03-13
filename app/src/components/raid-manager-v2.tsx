@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 // --- Interfaces ---
 interface RaidApplication {
@@ -487,6 +488,7 @@ function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGrou
 
 export default function RaidManagerV2({ testMode = false }: { testMode?: boolean }) {
     const { isAdmin } = useAuth();
+    const { mode, dbPath } = useAppMode();
     const [applications, setApplications] = useState<RaidApplication[]>([]);
     const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
     const [roster, setRoster] = useState<any[]>([]);
@@ -560,19 +562,19 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
         }
 
         // 1. Load Fixed Groups
-        const unsubscribeGroups = onValue(ref(db, 'raid_fixed_groups'), (snapshot) => {
+        const unsubscribeGroups = onValue(ref(db, dbPath.fixedGroups), (snapshot) => {
             const data = snapshot.val();
             setFixedGroups(data ? Object.values(data) : []);
         });
 
         // 2. Load Members (Roster)
-        const unsubscribeMembers = onValue(ref(db, 'members'), (snap) => {
+        const unsubscribeMembers = onValue(ref(db, dbPath.members), (snap) => {
             const data = snap.val();
             setRoster(data ? Object.values(data) : []);
         });
 
         // 3. Load Applications
-        const unsubscribeApps = onValue(ref(db, 'raid_applications'), (snapshot) => {
+        const unsubscribeApps = onValue(ref(db, dbPath.raidApplications), (snapshot) => {
             const data = snapshot.val();
             setApplications(data ? Object.values(data) as RaidApplication[] : []);
         });
@@ -604,7 +606,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
 
             dummyData[id] = { id, nickname: `TestUser${i}`, class: cls, power, availability, updatedAt: new Date().toISOString() };
         }
-        await set(ref(db, 'raid_applications'), dummyData);
+        await set(ref(db, dbPath.raidApplications), dummyData);
         alert("완료");
     };
 
@@ -614,9 +616,9 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
         setIsResetModalOpen(false); // Close modal
 
         try {
-            await remove(ref(db, 'raid_applications'));
-            await remove(ref(db, 'raid_matched_forces'));
-            await remove(ref(db, 'raid_unassigned_members'));
+            await remove(ref(db, dbPath.raidApplications));
+            await remove(ref(db, dbPath.raidMatchedForces));
+            await remove(ref(db, dbPath.raidUnassignedMembers));
             alert("신청 정보가 성공적으로 초기화되었습니다.");
         } catch (e) {
             console.error("Reset Error:", e);

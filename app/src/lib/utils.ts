@@ -54,3 +54,19 @@ export const getCurrentWeek = () => {
 
   return `${month}월 ${week}주차`;
 };
+
+export const getClassColor = (className: string) => {
+  switch (className) {
+    case '수호성': return "bg-indigo-900 text-white"; // Navy
+    case '검성': return "bg-sky-400 text-white";   // Sky Blue
+    case '궁성': return "bg-emerald-700 text-emerald-50"; // Dark Green
+    case '살성': return "bg-lime-400 text-slate-900";   // Light Green
+    case '호법성': return "bg-orange-500 text-white"; // Orange
+    case '치유성': return "bg-yellow-400 text-slate-900"; // Yellow
+    case '마도성': return "bg-purple-600 text-white"; // Purple
+    case '정령성': return "bg-violet-300 text-slate-900"; // Light Purple
+    default: return "bg-indigo-500 text-white";
+  }
+};
+
+export const getJobShortName = (className: string) => className ? className.charAt(0) : '?';

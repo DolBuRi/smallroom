@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Trophy, Clock, Filter, Loader2, Award, Zap, RefreshCw, AlertCircle } from 'lucide-react';
+import { Trophy, Clock, Filter, Loader2, Award, Zap, RefreshCw, AlertCircle, Users } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
-import { GuildMember } from './member-list';
+import { GuildMember, SERVER_LIST } from './member-list';
 
 import { db } from '@/lib/firebase';
-import { ref, onValue, set } from 'firebase/database';
+import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 export default function RankingBoard() {
     const [data, setData] = useState<GuildMember[]>([]);
@@ -15,6 +16,7 @@ export default function RankingBoard() {
     const [activeTab, setActiveTab] = useState('All');
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
     const { isAdmin } = useAuth();
+    const { dbPath, mode } = useAppMode();
     const [isBatchRunning, setIsBatchRunning] = useState(false);
     const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
     const [appSettings, setAppSettings] = useState({
@@ -31,14 +33,23 @@ export default function RankingBoard() {
     const classes = ['All', '수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
 
     useEffect(() => {
-        const membersRef = ref(db, 'members');
+        const membersRef = ref(db, dbPath.members);
         const unsubscribe = onValue(membersRef, (snapshot) => {
             const val = snapshot.val();
             if (val) {
-                const members = (Object.values(val) as any[]).map((m: any) => ({
-                    ...m,
-                    clearCount: m.clearCount || '0회'
-                }));
+                const members = (Object.values(val) as any[]).map((m: any) => {
+                    // Legion page에서 등록된 경우 server/faction이 없을 수 있음. 
+                    // 고정 멤버 랭킹에서는 기본 설정을 바탕으로 이를 보완하여 표시함.
+                    const server = m.server || (mode === 'fixed' ? appSettings.serverName : undefined);
+                    const faction = m.faction || (server ? (SERVER_LIST as any[]).find((s: any) => s.name === server)?.faction : undefined);
+                    
+                    return {
+                        ...m,
+                        server,
+                        faction,
+                        clearCount: m.clearCount || '0회'
+                    };
+                });
                 setData(members);
             } else {
                 setData([]);
@@ -50,7 +61,7 @@ export default function RankingBoard() {
         });
 
         // [Fix] Listen to the dedicated Last Full Refresh timestamp instead of calculating it
-        const metadataRef = ref(db, 'metadata/lastFullRefresh');
+        const metadataRef = ref(db, dbPath.lastFullRefresh);
         const unsubscribeMeta = onValue(metadataRef, (snapshot) => {
             setLastUpdated(snapshot.val());
         });
@@ -59,16 +70,16 @@ export default function RankingBoard() {
             unsubscribe();
             unsubscribeMeta();
         };
-    }, []);
+    }, [dbPath]);
 
-    const scrapeMember = async (name: string, server: string = '아리엘') => {
+    const scrapeMember = async (name: string, serverId: string = '1006') => {
         // [Hybrid Strategy]
         // 1. Try Server-Side Proxy first (for Headless Server users)
         try {
             const res = await fetch('/api/proxy/scrape', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify({ name, serverId })
             });
             if (res.ok) {
                 const data = await res.json();
@@ -77,6 +88,9 @@ export default function RankingBoard() {
         } catch (e) {
             console.warn("Server scraping failed, falling back to extension:", e);
         }
+
+        const serverName = (SERVER_LIST as any[]).find(s => s.id === serverId)?.name || '아리엘';
+        const faction = (SERVER_LIST as any[]).find(s => s.id === serverId)?.faction;
 
         // 2. Fallback to Extension (for Client-Side users)
         return new Promise<{ success: boolean, data?: any, error?: string }>((resolve) => {
@@ -90,7 +104,7 @@ export default function RankingBoard() {
                 window.removeEventListener('message', handleResponse);
                 resolve({ success: false, error: 'Timeout' });
             }, 20000); // 20초 대기
-            window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server }, "*");
+            window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server: serverName, serverId, faction }, "*");
         });
     };
 
@@ -122,7 +136,8 @@ export default function RankingBoard() {
             setProgress({ current: i + 1, total: data.length, status: `${member.name} 갱신 중...` });
 
             try {
-                const res = await scrapeMember(member.name, appSettings.serverName);
+                const targetServerId = member.server ? ((SERVER_LIST as any[]).find(s => s.name === member.server)?.id || '1006') : '1006';
+                const res = await scrapeMember(member.name, targetServerId);
                 if (res.success && res.data) {
                     updatedList[i] = {
                         ...member,
@@ -141,9 +156,9 @@ export default function RankingBoard() {
 
         // Save back to server
         try {
-            await set(ref(db, 'members'), updatedList);
+            await set(ref(db, dbPath.members), updatedList);
             // [New] Update Last Full Refresh Timestamp
-            await set(ref(db, 'metadata/lastFullRefresh'), new Date().toISOString());
+            await set(ref(db, dbPath.lastFullRefresh), new Date().toISOString());
         } catch (e) {
             console.error("Failed to save refreshed data:", e);
             alert("저장 실패! (Firebase 오류)");
@@ -164,7 +179,8 @@ export default function RankingBoard() {
 
         setIsManualUpdating(true);
         try {
-            const res = await scrapeMember(manualUpdateName, appSettings.serverName);
+            const targetServerId = targetMember.server ? ((SERVER_LIST as any[]).find(s => s.name === targetMember.server)?.id || '1006') : '1006';
+            const res = await scrapeMember(manualUpdateName, targetServerId);
             if (res.success && res.data) {
                 const updatedList = data.map(m => m.name === manualUpdateName.trim() ? {
                     ...m,
@@ -180,7 +196,7 @@ export default function RankingBoard() {
                 setData(updatedList);
 
                 // Save to Firebase
-                await set(ref(db, 'members'), updatedList);
+                await set(ref(db, dbPath.members), updatedList);
 
                 alert(`${manualUpdateName} 갱신 완료!`);
                 setManualUpdateName(''); // Clear input on success
@@ -219,11 +235,12 @@ export default function RankingBoard() {
                 <div>
                     <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
                         <Trophy className="text-amber-500" size={36} />
-                        레기온 멤버 랭킹
+                        {mode === 'fixed' ? '고정 멤버 랭킹' : '레기온 멤버 랭킹'}
                     </h2>
                     <div className="flex items-center gap-4 mt-3 font-medium">
                         <div className="text-slate-500 dark:text-slate-300 text-sm flex items-center gap-2">
-                            길드원들의 전투력 랭킹입니다.
+                            <Users size={14} className="text-amber-500" />
+                            {data.length}명의 멤버 랭킹입니다.
                             <div className="group relative flex items-center">
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
@@ -233,7 +250,7 @@ export default function RankingBoard() {
                             </div>
                         </div>
                         {lastUpdated && (
-                            <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
+                            <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
                                 <Clock size={12} />
                                 마지막 전체 갱신: {formatRelativeTime(lastUpdated)}
                             </span>
@@ -365,6 +382,16 @@ export default function RankingBoard() {
                                         <span className="px-3 py-1 bg-slate-50 dark:bg-slate-700/50 text-slate-400 dark:text-indigo-200 text-[10px] font-black rounded-lg border border-slate-100 dark:border-slate-700 tracking-widest uppercase">{m.class}</span>
                                         {m.rank === '군단장' && <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 px-2 py-0.5 rounded-md font-black border border-amber-100 dark:border-amber-900/30 tracking-tight">군단장</span>}
                                         {(m.rank === '장교' || m.rank === '엘리트 장교') && <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black border border-indigo-100 dark:border-indigo-900/30 tracking-tight">장교</span>}
+                                        {mode === 'fixed' && m.faction && (
+                                            <span className={cn(
+                                                "text-[10px] px-2 py-0.5 rounded-md font-black border tracking-tight",
+                                                m.faction === '천족'
+                                                    ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 border-amber-100 dark:border-amber-900/30"
+                                                    : "bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border-purple-100 dark:border-purple-900/30"
+                                            )}>
+                                                {m.faction}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 

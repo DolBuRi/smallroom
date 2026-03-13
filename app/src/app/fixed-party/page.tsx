@@ -2,6 +2,6 @@
 
 import DashboardLayout from '@/components/dashboard-layout';
 
-export default function Home() {
+export default function FixedPartyPage() {
   return <DashboardLayout />;
 }

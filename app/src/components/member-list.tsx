@@ -4,8 +4,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, Users, UserCheck, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Sheet } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { ref, onValue, set } from 'firebase/database';
+import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 // Data Type
 export interface GuildMember {
@@ -21,20 +22,63 @@ export interface GuildMember {
     lastUpdated?: string;
     specialNotes?: string;
     joinDate?: string;
+    faction?: '천족' | '마족';
+    server?: string;
 }
 
-const SERVER_LIST = [
-    { id: 'all', name: '전체 서버' },
-    { id: '1006', name: '아리엘' },
-    { id: '2001', name: '이스라펠' },
-    { id: '1001', name: '시엘' },
-    { id: '1002', name: '네자칸' },
-    { id: '2002', name: '지켈' },
-    { id: '2003', name: '트리니엘' },
+export const SERVER_LIST = [
+    { id: 'all', name: '전체 서버', faction: '전체' },
+    
+    // 천족 (Elyos)
+    { id: '1001', name: '시엘', faction: '천족' },
+    { id: '1002', name: '네자칸', faction: '천족' },
+    { id: '1003', name: '바이젤', faction: '천족' },
+    { id: '1004', name: '카이시넬', faction: '천족' },
+    { id: '1005', name: '유스티엘', faction: '천족' },
+    { id: '1006', name: '아리엘', faction: '천족' },
+    { id: '1007', name: '프레기온', faction: '천족' },
+    { id: '1008', name: '메스람타에다', faction: '천족' },
+    { id: '1009', name: '히타니에', faction: '천족' },
+    { id: '1010', name: '나니아', faction: '천족' },
+    { id: '1011', name: '타하바타', faction: '천족' },
+    { id: '1012', name: '루터스', faction: '천족' },
+    { id: '1013', name: '페르노스', faction: '천족' },
+    { id: '1014', name: '다미누', faction: '천족' },
+    { id: '1015', name: '카사카', faction: '천족' },
+    { id: '1016', name: '바카르마', faction: '천족' },
+    { id: '1017', name: '챈가룽', faction: '천족' },
+    { id: '1018', name: '코치룽', faction: '천족' },
+    { id: '1019', name: '이슈타르', faction: '천족' },
+    { id: '1020', name: '티아마트', faction: '천족' },
+    { id: '1021', name: '포에타', faction: '천족' },
+
+    // 마족 (Asmodian)
+    { id: '2001', name: '이스라펠', faction: '마족' },
+    { id: '2002', name: '지켈', faction: '마족' },
+    { id: '2003', name: '트리니엘', faction: '마족' },
+    { id: '2004', name: '루미엘', faction: '마족' },
+    { id: '2005', name: '마르쿠탄', faction: '마족' },
+    { id: '2006', name: '아스펠', faction: '마족' },
+    { id: '2007', name: '에레슈키갈', faction: '마족' },
+    { id: '2008', name: '브리트라', faction: '마족' },
+    { id: '2009', name: '네먼', faction: '마족' },
+    { id: '2010', name: '하달', faction: '마족' },
+    { id: '2011', name: '루드라', faction: '마족' },
+    { id: '2012', name: '울고른', faction: '마족' },
+    { id: '2013', name: '무닌', faction: '마족' },
+    { id: '2014', name: '오다르', faction: '마족' },
+    { id: '2015', name: '젠카카', faction: '마족' },
+    { id: '2016', name: '크로메데', faction: '마족' },
+    { id: '2017', name: '콰이링', faction: '마족' },
+    { id: '2018', name: '바바룽', faction: '마족' },
+    { id: '2019', name: '파프니르', faction: '마족' },
+    { id: '2020', name: '인드라투', faction: '마족' },
+    { id: '2021', name: '이스할겐', faction: '마족' },
 ];
 
 export default function MemberList() {
     const { isAdmin, user, loading } = useAuth();
+    const { dbPath, mode } = useAppMode();
     const [members, setMembers] = useState<GuildMember[]>([]);
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -66,7 +110,7 @@ export default function MemberList() {
             return;
         }
 
-        const membersRef = ref(db, 'members');
+        const membersRef = ref(db, dbPath.members);
         const unsubscribe = onValue(membersRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
@@ -87,7 +131,7 @@ export default function MemberList() {
             setIsLoadingData(false);
         });
 
-        const metadataRef = ref(db, 'metadata/lastFullRefresh');
+        const metadataRef = ref(db, dbPath.lastFullRefresh);
         const unsubscribeMeta = onValue(metadataRef, (snapshot) => {
             setLastFullRefresh(snapshot.val());
         });
@@ -96,12 +140,12 @@ export default function MemberList() {
             unsubscribe();
             unsubscribeMeta();
         };
-    }, [user, loading]);
+    }, [user, loading, dbPath]);
 
     const saveMembers = async (newMembers: GuildMember[]) => {
         setIsSaving(true);
         try {
-            await set(ref(db, 'members'), newMembers);
+            await set(ref(db, dbPath.members), newMembers);
         } catch (e) {
             alert("저장 실패!");
         } finally {
@@ -114,18 +158,21 @@ export default function MemberList() {
         saveMembers(newList);
     };
 
-    const scrapeMember = async (name: string, server: string = '아리엘') => {
+    const scrapeMember = async (name: string, serverId: string = '1006') => {
         try {
             const res = await fetch('/api/proxy/scrape', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify({ name, serverId })
             });
             if (res.ok) {
                 const data = await res.json();
                 if (data.success) return data;
             }
         } catch (e) { }
+
+        const serverName = SERVER_LIST.find(s => s.id === serverId)?.name || '아리엘';
+        const faction = SERVER_LIST.find(s => s.id === serverId)?.faction;
 
         return new Promise<any>((resolve) => {
             const handleResponse = (event: MessageEvent) => {
@@ -138,7 +185,7 @@ export default function MemberList() {
                 window.removeEventListener('message', handleResponse);
                 resolve({ success: false, error: 'Timeout' });
             }, 20000);
-            window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server }, "*");
+            window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server: serverName, serverId, faction }, "*");
         });
     };
 
@@ -164,7 +211,8 @@ export default function MemberList() {
             setProgress({ current: i + 1, total: validMembers.length, status: '갱신 중...' });
 
             try {
-                const res = await scrapeMember(member.name, appSettings.serverName);
+                const targetServerId = member.server ? (SERVER_LIST.find(s => s.name === member.server)?.id || '1006') : '1006';
+                const res = await scrapeMember(member.name, targetServerId);
                 if (res.success && res.data) {
                     updatedList = updatedList.map(m => m.id === member.id ? {
                         ...m,
@@ -181,10 +229,16 @@ export default function MemberList() {
             if (i < validMembers.length - 1) await new Promise(r => setTimeout(r, 4000));
         }
 
-        updateMembers(updatedList);
-        await set(ref(db, 'metadata/lastFullRefresh'), new Date().toISOString());
-        setIsBatchRunning(false);
-        alert(`갱신 완료! (성공: ${successCount}/${validMembers.length})`);
+        try {
+            await set(ref(db, dbPath.members), updatedList);
+            await set(ref(db, dbPath.lastFullRefresh), new Date().toISOString());
+            setMembers(updatedList); // Update local state after successful save
+        } catch (e) {
+            alert("갱신된 정보 저장 실패!");
+        } finally {
+            setIsBatchRunning(false);
+            alert(`갱신 완료! (성공: ${successCount}/${validMembers.length})`);
+        }
     };
 
     const handleSearch = async () => {
@@ -192,20 +246,22 @@ export default function MemberList() {
         setIsSearching(true);
         setSearchResult(null);
         try {
-            const targetServer = SERVER_LIST.find(s => s.id === searchServer)?.name || appSettings.serverName;
-            const result = await scrapeMember(searchName, targetServer);
-            if (result.success && result.data) {
+            const serverObj = SERVER_LIST.find(s => s.id === searchServer);
+            const res = await scrapeMember(searchName, searchServer);
+            if (res.success && res.data) {
                 setSearchResult({
                     id: String(Date.now()),
-                    name: result.data.name,
+                    name: res.data.name,
                     rank: '군단병',
-                    class: result.data.class,
-                    power: parseInt(result.data.power),
-                    score: parseInt(result.data.score) || 0,
-                    guild: result.data.guild,
-                    isActive: result.data.guild === appSettings.guildName,
+                    class: res.data.class,
+                    power: parseInt(res.data.power),
+                    score: parseInt(res.data.score) || 0,
+                    guild: res.data.guild,
+                    isActive: res.data.guild === appSettings.guildName,
                     clearCount: '0회',
-                    lastUpdated: new Date().toISOString()
+                    lastUpdated: new Date().toISOString(),
+                    faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
+                    server: mode === 'fixed' ? serverObj?.name : undefined
                 });
             } else { setSearchResult('not-found'); }
         } catch (e) { alert("검색 중 오류 발생"); }
@@ -216,7 +272,9 @@ export default function MemberList() {
         if (!nameToUpdate.trim()) return;
         setIsManualUpdating(true);
         try {
-            const res = await scrapeMember(nameToUpdate, appSettings.serverName);
+            const member = members.find(m => m.name === nameToUpdate);
+            const targetServerId = member?.server ? (SERVER_LIST.find(s => s.name === member.server)?.id || '1006') : '1006';
+            const res = await scrapeMember(nameToUpdate, targetServerId);
             if (res.success && res.data) {
                 let found = false;
                 const newList = members.map(m => {
@@ -249,9 +307,15 @@ export default function MemberList() {
                 alert("이미 등록된 멤버입니다.");
                 return;
             }
-            updateMembers([...members, searchResult]);
+            const serverObj = SERVER_LIST.find(s => s.id === searchServer);
+            updateMembers([...members, {
+                ...searchResult,
+                faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
+                server: mode === 'fixed' ? serverObj?.name : undefined
+            }]);
             closeModal();
         } else if (searchResult === 'not-found') {
+            const serverObj = SERVER_LIST.find(s => s.id === searchServer);
             const cls = (document.getElementById('manual-class') as HTMLSelectElement).value;
             const pwr = parseInt((document.getElementById('manual-power') as HTMLInputElement).value) || 0;
             updateMembers([...members, {
@@ -264,7 +328,9 @@ export default function MemberList() {
                 guild: '-',
                 isActive: false,
                 clearCount: '0회',
-                lastUpdated: new Date().toISOString()
+                lastUpdated: new Date().toISOString(),
+                faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
+                server: mode === 'fixed' ? serverObj?.name : undefined
             }]);
             closeModal();
         }
@@ -304,8 +370,9 @@ export default function MemberList() {
     }, [members]);
 
     const renderedMemberRows = useMemo(() => {
+        const colCount = mode === 'fixed' ? (isManageMode ? 6 : 5) : (isAdmin ? 10 : 8);
         if (sortedMembers.length === 0) {
-            return <tr><td colSpan={10} className="text-center py-20 text-slate-400 font-medium">등록된 멤버가 없습니다.</td></tr>;
+            return <tr><td colSpan={colCount} className="text-center py-20 text-slate-400 font-medium">등록된 멤버가 없습니다.</td></tr>;
         }
         return sortedMembers.map(m => (
             <tr key={m.id} className={cn("transition-all duration-200", isManageMode && selectedIds.includes(m.id) ? "bg-indigo-50/50 dark:bg-indigo-900/20" : "hover:bg-slate-50/30 dark:hover:bg-slate-800/30")}>
@@ -317,48 +384,59 @@ export default function MemberList() {
                     </td>
                 )}
                 <td className="px-5 py-5 font-black text-slate-700 dark:text-slate-200">{m.name}</td>
-                <td className="px-5 py-5 text-center">
-                    <div className="relative w-[100px] mx-auto flex items-center justify-center">
-                        <span className={cn("absolute left-0 pointer-events-none z-10", m.rank === '군단장' ? "text-amber-500" : (m.rank === '장교' || m.rank === '엘리트 장교') ? "text-indigo-400" : "text-slate-400")}>
-                            {m.rank === '군단장' ? '👑' : (m.rank === '장교' || m.rank === '엘리트 장교') ? '🎖️' : '🛡️'}
-                        </span>
-                        <select
-                            value={m.rank}
-                            onChange={(e) => isAdmin && updateMembers(members.map(curr => curr.id === m.id ? { ...curr, rank: e.target.value as any } : curr))}
-                            className={cn(
-                                "bg-transparent border-none outline-none font-bold cursor-pointer rounded px-2 py-1 transition-all hover:bg-white/50 dark:hover:bg-slate-700/50 text-center w-full appearance-none pl-6",
-                                m.rank === '군단장' ? "text-amber-500 text-sm" : (m.rank === '장교' || m.rank === '엘리트 장교') ? "text-indigo-400 text-sm" : "text-slate-400 text-[13px]"
-                            )}
-                        >
-                            <option value="군단장">군단장</option>
-                            <option value="장교">장교</option>
-                            <option value="군단병">군단병</option>
-                        </select>
-                        <div className="absolute right-0 pointer-events-none text-slate-400"><ChevronDown size={14} strokeWidth={3} /></div>
-                    </div>
-                </td>
-                <td className="px-5 py-5 text-center font-bold">{m.class}</td>
+                {mode !== 'fixed' && (
+                    <td className="px-5 py-5 text-center">
+                        <div className="relative w-[100px] mx-auto flex items-center justify-center">
+                            <span className={cn("absolute left-0 pointer-events-none z-10", m.rank === '군단장' ? "text-amber-500" : (m.rank === '장교' || m.rank === '엘리트 장교') ? "text-indigo-400" : "text-slate-400")}>
+                                {m.rank === '군단장' ? '👑' : (m.rank === '장교' || m.rank === '엘리트 장교') ? '🎖️' : '🛡️'}
+                            </span>
+                            <select
+                                value={m.rank}
+                                onChange={(e) => isAdmin && updateMembers(members.map(curr => curr.id === m.id ? { ...curr, rank: e.target.value as any } : curr))}
+                                className={cn(
+                                    "bg-transparent border-none outline-none font-bold cursor-pointer rounded px-2 py-1 transition-all hover:bg-white/50 dark:hover:bg-slate-700/50 text-center w-full appearance-none pl-6",
+                                    m.rank === '군단장' ? "text-amber-500 text-sm" : (m.rank === '장교' || m.rank === '엘리트 장교') ? "text-indigo-400 text-sm" : "text-slate-400 text-[13px]"
+                                )}
+                            >
+                                <option value="군단장">군단장</option>
+                                <option value="장교">장교</option>
+                                <option value="군단병">군단병</option>
+                            </select>
+                            <div className="absolute right-0 pointer-events-none text-slate-400"><ChevronDown size={14} strokeWidth={3} /></div>
+                        </div>
+                    </td>
+                )}
+                <td className="px-5 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{m.class}</td>
                 <td className="px-5 py-5 text-center font-black text-indigo-600 dark:text-indigo-300">{m.power.toLocaleString()}</td>
                 <td className="px-5 py-5 text-center font-bold text-amber-500">{(m.score || 0).toLocaleString()}</td>
-                <td className="px-5 py-5 text-center">
-                    <select
-                        value={m.clearCount}
-                        onChange={(e) => isAdmin && updateMembers(members.map(curr => curr.id === m.id ? { ...curr, clearCount: e.target.value } : curr))}
-                        className={cn(
-                            "bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 outline-none font-bold cursor-pointer rounded-lg px-3 py-1.5 transition-all text-xs",
-                            m.clearCount === '숙련' ? "text-indigo-400 border-indigo-200" : "text-slate-500 dark:text-slate-300"
-                        )}
-                    >
-                        {['0회', '1회', '2회', '3회', '4회', '숙련'].map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                </td>
-                {isAdmin && <SpecialNoteCell member={m} onSave={(notes) => updateMembers(members.map(curr => curr.id === m.id ? { ...curr, specialNotes: notes } : curr))} />}
-                {isAdmin && <JoinDateCell member={m} onSave={(date) => updateMembers(members.map(curr => curr.id === m.id ? { ...curr, joinDate: date } : curr))} />}
-                <td className="px-5 py-5 text-center">
-                    <div className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black tracking-tighter", m.isActive ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30" : "bg-red-50 text-red-600 dark:bg-red-900/30")}>
-                        <Check size={12} strokeWidth={4} /> {m.isActive ? '확인됨' : '미확인'}
-                    </div>
-                </td>
+                {mode === 'fixed' && (
+                    <td className="px-5 py-5 text-center font-bold text-slate-600 dark:text-slate-300">
+                        {m.server || '아리엘'}
+                    </td>
+                )}
+                {mode !== 'fixed' && (
+                    <>
+                        <td className="px-5 py-5 text-center">
+                            <select
+                                value={m.clearCount}
+                                onChange={(e) => isAdmin && updateMembers(members.map(curr => curr.id === m.id ? { ...curr, clearCount: e.target.value } : curr))}
+                                className={cn(
+                                    "bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 outline-none font-bold cursor-pointer rounded-lg px-3 py-1.5 transition-all text-xs",
+                                    m.clearCount === '숙련' ? "text-indigo-400 border-indigo-200" : "text-slate-500 dark:text-slate-300"
+                                )}
+                            >
+                                {['0회', '1회', '2회', '3회', '4회', '숙련'].map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </td>
+                        {isAdmin && <SpecialNoteCell member={m} onSave={(notes) => updateMembers(members.map(curr => curr.id === m.id ? { ...curr, specialNotes: notes } : curr))} />}
+                        {isAdmin && <JoinDateCell member={m} onSave={(date) => updateMembers(members.map(curr => curr.id === m.id ? { ...curr, joinDate: date } : curr))} />}
+                        <td className="px-5 py-5 text-center">
+                            <div className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black tracking-tighter", m.isActive ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30" : "bg-red-50 text-red-600 dark:bg-red-900/30")}>
+                                <Check size={12} strokeWidth={4} /> {m.isActive ? '확인됨' : '미확인'}
+                            </div>
+                        </td>
+                    </>
+                )}
             </tr>
         ));
     }, [sortedMembers, isManageMode, selectedIds, isAdmin, members]);
@@ -369,12 +447,13 @@ export default function MemberList() {
                 <div>
                     <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
                         <Users className="text-indigo-500 dark:text-indigo-400" size={36} />
-                        레기온 멤버
+                        {mode === 'fixed' ? '고정 파티 멤버' : '레기온 멤버'}
                         {isSaving && <Loader2 size={24} className="text-slate-300 animate-spin ml-2" />}
                     </h2>
                     <div className="flex items-center gap-4 mt-3 font-medium">
                         <div className="text-slate-500 dark:text-slate-300 text-sm flex items-center gap-2">
-                            총 {members.length}명의 멤버가 존재합니다.
+                            <UserCheck size={14} className="text-indigo-400" />
+                            {members.length}명의 멤버가 존재합니다.
                             <div className="group relative flex items-center">
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
@@ -398,9 +477,13 @@ export default function MemberList() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <button onClick={() => window.open('https://docs.google.com/spreadsheets/d/1L3XMo2hOd9drdGPT25S3kNdajxfVCeHf6k0Oznz3K70/edit', '_blank')} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-emerald-100 shadow-sm dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
-                        <Sheet size={18} /> 구글 시트
-                    </button>
+                    {isAdmin && (
+                        <button onClick={() => {
+                            window.open('https://docs.google.com/spreadsheets/d/1L3XMo2hOd9drdGPT25S3kNdajxfVCeHf6k0Oznz3K70/edit', '_blank');
+                        }} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-emerald-100 shadow-sm dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
+                            <Sheet size={18} /> 구글 시트
+                        </button>
+                    )}
                     {!isManageMode ? (
                         <button onClick={() => isAdmin ? setIsManageMode(true) : alert("관리자 권한 필요")} className="text-slate-500 hover:text-indigo-600 hover:bg-white transition-all px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-bold border border-transparent hover:border-indigo-100 shadow-sm dark:text-slate-400">
                             <Settings size={18} /> 관리하기
@@ -440,14 +523,19 @@ export default function MemberList() {
                                 <tr>
                                     {isManageMode && <th className="w-16 px-2 py-5 text-center">선택</th>}
                                     <th className="px-5 py-5 text-center">닉네임</th>
-                                    <th className="px-5 py-5 text-center">계급</th>
+                                    {mode !== 'fixed' && <th className="px-5 py-5 text-center">계급</th>}
                                     <th className="px-5 py-5 text-center">직업</th>
                                     <th className="px-5 py-5 text-center">전투력</th>
                                     <th className="px-5 py-5 text-center">아툴 점수</th>
-                                    <th className="px-5 py-5 text-center">성역</th>
-                                    {isAdmin && <th className="w-[185px] px-2 py-5 text-center">특이사항</th>}
-                                    {isAdmin && <th className="px-5 py-5 text-center text-xs">가입일</th>}
-                                    <th className="px-5 py-5 text-center">소속 여부</th>
+                                    {mode === 'fixed' && <th className="px-5 py-5 text-center">서버</th>}
+                                    {mode !== 'fixed' && (
+                                        <>
+                                            <th className="px-5 py-5 text-center">성역</th>
+                                            {isAdmin && <th className="w-[185px] px-2 py-5 text-center">특이사항</th>}
+                                            {isAdmin && <th className="px-5 py-5 text-center text-xs">가입일</th>}
+                                            <th className="px-5 py-5 text-center">소속 여부</th>
+                                        </>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">{renderedMemberRows}</tbody>
@@ -472,6 +560,36 @@ export default function MemberList() {
                                     </button>
                                 </div>
                             </div>
+
+                            {mode === 'fixed' && (
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-500 pl-1 uppercase tracking-widest">서버 및 종족 선택</label>
+                                        <div className="relative">
+                                            <select 
+                                                value={searchServer}
+                                                onChange={(e) => setSearchServer(e.target.value)}
+                                                className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-4 text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none cursor-pointer"
+                                            >
+                                                <optgroup label="천족 (Elyos)">
+                                                    {SERVER_LIST.filter(s => s.faction === '천족').map(s => (
+                                                        <option key={s.id} value={s.id}>천족 - {s.name}</option>
+                                                    ))}
+                                                </optgroup>
+                                                <optgroup label="마족 (Asmodian)">
+                                                    {SERVER_LIST.filter(s => s.faction === '마족').map(s => (
+                                                        <option key={s.id} value={s.id}>마족 - {s.name}</option>
+                                                    ))}
+                                                </optgroup>
+                                            </select>
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                                <ChevronDown size={18} strokeWidth={3} />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="min-h-[140px] flex items-center justify-center bg-slate-50 dark:bg-slate-800/80 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
                                 {isSearching ? (
                                     <div className="text-center space-y-2">

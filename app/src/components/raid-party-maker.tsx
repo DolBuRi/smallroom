@@ -19,9 +19,10 @@ import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } 
 import { CSS } from '@dnd-kit/utilities';
 import { Users, GripVertical, Shuffle, Zap, Trash2, Copy, Check, Sword, Shield, Crosshair, Sparkles, Settings2, Settings, X, XCircle, CheckCircle2, ChevronRight, Clock, Calendar, Plus, Lock, AlertTriangle, RotateCcw, AlertCircle, CheckCircle, Link } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, get, child } from 'firebase/database';
-import { cn } from '@/lib/utils';
+import { cn, getClassColor } from '@/lib/utils';
 
 // --- Types ---
 interface Member {
@@ -33,6 +34,9 @@ interface Member {
     rank: string;
     fixedGroupId?: string;
     availability?: Record<string, string[]>;
+    faction?: '천족' | '마족';
+    ownerName?: string;
+    isSub?: boolean;
 }
 
 
@@ -95,20 +99,6 @@ const CLASS_ICONS: Record<string, React.ReactNode> = {
     '호법성': <Zap size={14} className="text-orange-500" />,
 };
 
-const getClassColor = (className: string) => {
-    switch (className) {
-        case '수호성': return "bg-indigo-900 text-white";
-        case '검성': return "bg-sky-400 text-white";
-        case '궁성': return "bg-emerald-700 text-emerald-50";
-        case '살성': return "bg-lime-400 text-slate-900";
-        case '호법성': return "bg-orange-500 text-white";
-        case '치유성': return "bg-yellow-400 text-slate-900";
-        case '마도성': return "bg-purple-600 text-white";
-        case '정령성': return "bg-violet-300 text-slate-900";
-        default: return "bg-slate-400 text-white";
-    }
-};
-
 // --- Sub Components ---
 
 function DroppableAlgoColumn({ id, items, children }: { id: string, items: AlgoCard[], children: React.ReactNode }) {
@@ -162,9 +152,10 @@ function SortableAlgoCard({ card, isAdmin, isOverlay = false }: { card: AlgoCard
 
     return (
         <div ref={setNodeRef} style={style} {...attributes} {...listeners}
-            onClick={() => {
+            onPointerDownCapture={(e) => {
                 if (!isAdmin) {
-                    alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                    alert("알고리즘 우선순위를 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                    e.stopPropagation();
                 }
             }}
             className={cn(
@@ -399,7 +390,8 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
                 {fixedGroup && (
                     <Link size={10} className={cn("rotate-45", COLOR_MAP_TEXT[fixedGroup.color] || 'text-slate-400')} strokeWidth={3} />
                 )}
-                <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                    {member.isSub && <RotateCcw size={10} className="text-indigo-400" />}
                     {member.power.toLocaleString()}
                 </span>
             </div>
@@ -534,6 +526,14 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
 // --- Main Component ---
 export default function RaidPartyMakerV3({ testMode = false }: { testMode?: boolean }) {
     const { loading, isAdmin } = useAuth();
+    const { mode, dbPath } = useAppMode();
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 5, // minimum 5px drag to initiate dragging (prevents accidental clicks / micro movements)
+            },
+        })
+    );
     const [isMounted, setIsMounted] = useState(false);
 
     // Data State
@@ -542,6 +542,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [pool, setPool] = useState<Member[]>([]);
     const [applications, setApplications] = useState<Member[]>([]);
     const [parties, setParties] = useState<Party[]>([]);
+    const [excludedOwners, setExcludedOwners] = useState<string[]>([]);
+    const [allSubChars, setAllSubChars] = useState<Member[]>([]);
+    const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
 
     // UI State
     const [draggedMember, setDraggedMember] = useState<Member | null>(null);
@@ -615,6 +618,32 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         setTimeSelectionModal({ isOpen: false, member: null, targetPartyId: null });
     };
 
+    const toggleAttendance = async (ownerName: string) => {
+        const isExcluded = excludedOwners.includes(ownerName);
+        const newExcluded = isExcluded
+            ? excludedOwners.filter(name => name !== ownerName)
+            : [...excludedOwners, ownerName];
+
+        setExcludedOwners(newExcluded);
+
+        if (!testMode && isAdmin) {
+            try {
+                await set(ref(db, `${dbPath.raidAttendance}/excludedOwners`), newExcluded);
+            } catch (e) {
+                console.error("Failed to save attendance:", e);
+            }
+        }
+
+        // Re-calculate applications if in fixed mode
+        if (mode === 'fixed') {
+            const applicants: Member[] = [
+                ...allMembers.filter(m => !newExcluded.includes(m.name)),
+                ...allSubChars.filter(m => m.ownerName && !newExcluded.includes(m.ownerName))
+            ];
+            setApplications(applicants);
+        }
+    };
+
     const handleShowTooltip = (member: Member, rect: DOMRect) => {
         setTooltipInfo({ member, rect });
     };
@@ -681,9 +710,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             return;
         }
 
-        const loadMembers = async () => {
+        const loadData = async () => {
             // 1. Load Roster (members)
-            const membersRef = ref(db, 'members');
+            const membersRef = ref(db, dbPath.members);
             onValue(membersRef, (memberSnap) => {
                 const memberData = memberSnap.val();
                 const roster: Member[] = memberData ? Object.values(memberData).map((m: any) => ({
@@ -694,42 +723,65 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                 })) : [];
                 setAllMembers(roster);
 
-                // 2. Load Applications (raid_applications)
-                const appsRef = ref(db, 'raid_applications');
-                onValue(appsRef, (appSnap) => {
-                    const appData = appSnap.val();
-                    if (appData) {
-                        const applications = Object.values(appData) as any[];
+                // 2. Load Sub-Characters
+                const subCharsRef = ref(db, dbPath.subCharacters);
+                onValue(subCharsRef, (subSnap) => {
+                    const subData = subSnap.val();
+                    const subList: Member[] = subData ? Object.values(subData).map((m: any) => ({
+                        id: m.id, name: m.name, class: m.class || '검성',
+                        power: m.power || 0, score: m.score || 0, rank: '',
+                        ownerName: m.ownerName,
+                        isSub: true,
+                        fixedGroupId: roster.find(rm => rm.name === m.ownerName)?.fixedGroupId
+                    })) : [];
+                    setAllSubChars(subList);
 
-                        // 3. Map applications to Member objects, enriching with roster data
-                        const applicantList: Member[] = applications.map(app => {
-                            // Find matching member in roster by nickname
-                            const rosterMember = roster.find(m => m.name === app.nickname);
+                    // 3. Load Attendance (Excluded Owners)
+                    const attendanceRef = ref(db, dbPath.raidAttendance);
+                    onValue(attendanceRef, (attSnap) => {
+                        const attData = attSnap.val();
+                        const excluded = attData?.excludedOwners || [];
+                        setExcludedOwners(excluded);
 
-                            return {
-                                id: app.id || app.nickname,
-                                name: app.nickname,
-                                class: app.class || (rosterMember?.class) || '검성',
-                                power: app.power || (rosterMember?.power) || 0,
-                                score: rosterMember?.score || 0,
-                                rank: rosterMember?.rank || '',
-                                availability: app.availability,
-                                fixedGroupId: rosterMember?.fixedGroupId
-                            };
-                        });
-
-                        setApplications(applicantList);
-                    } else {
-                        setApplications([]);
-                    }
+                        if (mode === 'fixed') {
+                            // In fixed mode, applications are derived from roster + subList
+                            const applicants: Member[] = [
+                                ...roster.filter(m => !excluded.includes(m.name)),
+                                ...subList.filter(m => m.ownerName && !excluded.includes(m.ownerName))
+                            ];
+                            setApplications(applicants);
+                        } else {
+                            // In legion mode, load from raidApplications
+                            const appsRef = ref(db, dbPath.raidApplications);
+                            onValue(appsRef, (appSnap) => {
+                                const appData = appSnap.val();
+                                if (appData) {
+                                    const appList = Object.values(appData) as any[];
+                                    const applicantList: Member[] = appList.map(app => {
+                                        const rosterMember = roster.find(m => m.name === app.nickname);
+                                        return {
+                                            id: app.id || app.nickname,
+                                            name: app.nickname,
+                                            class: app.class || (rosterMember?.class) || '검성',
+                                            power: app.power || (rosterMember?.power) || 0,
+                                            score: rosterMember?.score || 0,
+                                            rank: rosterMember?.rank || '',
+                                            availability: app.availability,
+                                            fixedGroupId: rosterMember?.fixedGroupId
+                                        };
+                                    });
+                                    setApplications(applicantList);
+                                } else {
+                                    setApplications([]);
+                                }
+                            }, { onlyOnce: true });
+                        }
+                    }, { onlyOnce: true });
                 }, { onlyOnce: true });
-
-                // Init Parties in loadMembers removed in favor of real-time sync EFFECT below
-
             }, { onlyOnce: true });
         };
-        loadMembers();
-    }, [testMode]);
+        loadData();
+    }, [testMode, mode, dbPath]);
 
     // 2. Real-time Sync for Parties
     useEffect(() => {
@@ -740,7 +792,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             return;
         }
 
-        const sessionRef = ref(db, 'raid_matching_session');
+        const sessionRef = ref(db, dbPath.raidMatchingSession);
         const unsubscribe = onValue(sessionRef, (snap) => {
             const data = snap.val();
             if (data && data.parties && Array.isArray(data.parties)) {
@@ -786,7 +838,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const uiFilteredPool = newPool.filter(m => {
             const matchSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
             const matchClass = filterClass === 'ALL' || m.class === filterClass;
-            const matchSchedule = selectedDay === 'ALL' || (m.availability?.[selectedDay]?.length || 0) > 0;
+            const matchSchedule = mode === 'fixed' || selectedDay === 'ALL' || (m.availability?.[selectedDay]?.length || 0) > 0;
             return matchSearch && matchClass && matchSchedule;
         });
 
@@ -799,7 +851,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         if (!isAdmin || testMode) return false;
 
         try {
-            const sessionRef = ref(db, 'raid_matching_session');
+            const sessionRef = ref(db, dbPath.raidMatchingSession);
             const snapshot = await get(sessionRef);
             const data = snapshot.val();
             const remoteVersion = data?.version || 0;
@@ -824,8 +876,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
 
             const serializedParties = JSON.parse(JSON.stringify(updatedParties));
-            await set(ref(db, 'raid_matching_session/parties'), serializedParties);
-            await set(ref(db, 'raid_matching_session/version'), remoteVersion + 1);
+            await set(ref(db, `${dbPath.raidMatchingSession}/parties`), serializedParties);
+            await set(ref(db, `${dbPath.raidMatchingSession}/version`), remoteVersion + 1);
             return true;
         } catch (e) {
             console.error("Save failed", e);
@@ -846,7 +898,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         const loadFixedGroups = async () => {
             try {
-                const snapshot = await get(ref(db, 'raid_fixed_groups'));
+                const snapshot = await get(ref(db, dbPath.fixedGroups));
                 if (snapshot.exists()) {
                     const data = snapshot.val() as FixedGroup[];
                     // Sanitize: Firebase removes empty arrays, so ensure memberIds exists
@@ -862,7 +914,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         { id: 'fg-2', name: '2팀', color: 'bg-indigo-500', memberIds: [] }
                     ];
                     setFixedGroups(defaults);
-                    set(ref(db, 'raid_fixed_groups'), defaults); // Create initial
+                    set(ref(db, dbPath.fixedGroups), defaults); // Create initial
                 }
             } catch (e) {
                 console.error("Failed to load fixed groups", e);
@@ -887,7 +939,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         const loadAlgoSettings = async () => {
             try {
-                const snapshot = await get(ref(db, 'raid_matching_session/algo_settings'));
+                const snapshot = await get(ref(db, `${dbPath.raidMatchingSession}/algo_settings`));
                 if (snapshot.exists()) {
                     const data = snapshot.val();
                     if (Array.isArray(data)) {
@@ -909,7 +961,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         // Remove undefined values before saving to Firebase
         const serialized = JSON.parse(JSON.stringify(fixedGroups));
-        set(ref(db, 'raid_fixed_groups'), serialized);
+        set(ref(db, dbPath.fixedGroups), serialized);
     }, [fixedGroups, isFixedGroupsLoaded, testMode, isAdmin]);
 
     // Sync Algo Settings to DB
@@ -918,7 +970,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         if (testMode || !isAdmin) return;
 
         const serialized = JSON.parse(JSON.stringify(algoCards));
-        set(ref(db, 'raid_matching_session/algo_settings'), serialized);
+        set(ref(db, `${dbPath.raidMatchingSession}/algo_settings`), serialized);
     }, [algoCards, isAlgoLoaded, testMode, isAdmin]);
 
 
@@ -1626,7 +1678,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         // Essential / Priority Cards
-        const essentialCards = algoCards.filter(c => c.status === 'ESSENTIAL');
+        const essentialCards = algoCards.filter(c => c.status === 'ESSENTIAL' && (mode !== 'fixed' || c.id !== 'schedule_gating'));
         const priorityCards = algoCards.filter(c => c.status === 'PRIORITY');
         const priorityWeights = [10000, 5000, 1000, 500, 100, 50, 10];
 
@@ -1662,6 +1714,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     let v = 0;
                     switch (cardId) {
                         case 'schedule_gating':
+                            if (mode === 'fixed') return 0;
                             partiesToEval.forEach(p => {
                                 if (!p.assignedDay || !p.assignedTime) return;
                                 p.members.forEach(m => {
@@ -1876,6 +1929,9 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             if (success) {
                 setParties(bestState);
                 alert(`스마트 매칭 완료!\n최적화 점수: ${bestScore.toLocaleString()}점`);
+                setIsAutoMatchModalOpen(false);
+            } else {
+                setIsAutoMatchModalOpen(false);
             }
         });
     };
@@ -1886,7 +1942,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
         // 1. Prepare
         let workingPool = [...pool];
-        let workingParties = [...parties];
+        let workingParties = parties.map(p => ({ ...p, members: [...p.members] }));
 
         if (targetScope === 'RESHUFFLE') {
             // Empty all parties first
@@ -1929,31 +1985,37 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             let forceTime = p1.assignedTime;
 
             if (!forceDay || !forceTime) {
-                // Unify logic: Search within selected days (for 'DAY' mode) or all days (for 'ALL' mode)
-                // This ensures we ignore the UI's 'selectedSlot' filter and pick the best available time
-                let candidateSlots: { day: string, slot: string, score: number }[] = [];
-                const daysToScan = matchType === 'DAY' ? matchOptions.selectedDays : RAID_DAYS;
-                const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
+                if (mode === 'fixed') {
+                    // In fixed mode, we don't necessarily need a day/time, but let's keep it null
+                    forceDay = undefined;
+                    forceTime = undefined;
+                } else {
+                    // Unify logic: Search within selected days (for 'DAY' mode) or all days (for 'ALL' mode)
+                    // This ensures we ignore the UI's 'selectedSlot' filter and pick the best available time
+                    let candidateSlots: { day: string, slot: string, score: number }[] = [];
+                    const daysToScan = matchType === 'DAY' ? matchOptions.selectedDays : RAID_DAYS;
+                    const allSlots = [...WEEKDAY_SLOTS, ...WEEKEND_SLOTS];
 
-                daysToScan.forEach(d => {
-                    allSlots.forEach(s => {
-                        const count = workingPool.filter(m => m.availability?.[d]?.includes(s.id)).length;
-                        if (count >= 4) { // Min 4 to form something
-                            candidateSlots.push({ day: d, slot: s.id, score: count });
-                        }
+                    daysToScan.forEach(d => {
+                        allSlots.forEach(s => {
+                            const count = workingPool.filter(m => m.availability?.[d]?.includes(s.id)).length;
+                            if (count >= 4) { // Min 4 to form something
+                                candidateSlots.push({ day: d, slot: s.id, score: count });
+                            }
+                        });
                     });
-                });
 
-                // Sort by score (person count) descending
-                candidateSlots.sort((a, b) => b.score - a.score);
+                    // Sort by score (person count) descending
+                    candidateSlots.sort((a, b) => b.score - a.score);
 
-                if (candidateSlots.length > 0) {
-                    forceDay = candidateSlots[0].day;
-                    forceTime = candidateSlots[0].slot;
+                    if (candidateSlots.length > 0) {
+                        forceDay = candidateSlots[0].day;
+                        forceTime = candidateSlots[0].slot;
+                    }
                 }
             }
 
-            if (!forceDay || !forceTime) return;
+            if (mode !== 'fixed' && (!forceDay || !forceTime)) return;
 
             p1.assignedDay = forceDay;
             p1.assignedTime = forceTime;
@@ -1961,10 +2023,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             p2.assignedTime = forceTime;
 
             // 3. Filter Candidates for THIS Force
-            let candidates = workingPool.filter(m => m.availability?.[forceDay!]?.includes(forceTime!));
+            let candidates = mode === 'fixed' ? [...workingPool] : workingPool.filter(m => m.availability?.[forceDay!]?.includes(forceTime!));
 
             // 4. Run Algorithm Pipeline (User Ordered)
-            const essentialCards = algoCards.filter(c => c.status === 'ESSENTIAL');
+            const essentialCards = algoCards.filter(c => c.status === 'ESSENTIAL' && (mode !== 'fixed' || c.id !== 'schedule_gating'));
             const priorityCards = algoCards.filter(c => c.status === 'PRIORITY');
 
             const runAlgo = (card: AlgoCard) => {
@@ -2019,7 +2081,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
             // 5. Final Fallback (Always fill if empty)
             if (candidates.length > 0 && (p1.members.length < 4 || p2.members.length < 4)) {
-                // Note: matchPowerBalance already respects the 3-non-cleric limit in its updated logic
                 const leftovers = matchPowerBalance([p1, p2], candidates);
                 if (leftovers.length > 0) {
                     workingPool = workingPool.filter(m => !leftovers.includes(m.id));
@@ -2027,13 +2088,20 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             }
         });
 
-        // Update State
+        const totalAssigned = workingParties.reduce((sum, p) => sum + p.members.length, 0);
+        if (totalAssigned === 0) {
+            alert("매칭된 인원이 없습니다. 대기 명단이나 알고리즘 설정을 확인해주세요.");
+            setIsAutoMatchModalOpen(false);
+            return;
+        }
+
         // Update State
         saveMatchingState(workingParties).then(success => {
             if (success) {
-                setParties([...workingParties]);
-                setIsAutoMatchModalOpen(false); // Close selection modal immediately
+                setParties(workingParties);
+                alert(`매칭 완료! (총 ${totalAssigned}명 배정됨)`);
             }
+            setIsAutoMatchModalOpen(false);
         });
     };
 
@@ -2167,7 +2235,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     // --- Render ---
     return (
-        <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={closestCenter}>
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={closestCenter}>
             <div className="relative flex h-[calc(100vh-140px)] gap-6 animate-in fade-in duration-500">
 
                 {/* 1. Left: Queue Dashboard */}
@@ -2188,8 +2256,24 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 className="text-xs bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
                                 title="고정 파티 관리"
                             >
-                                <Settings size={14} /> 고정 파티 설정
+                                <Settings size={14} /> 설정
                             </button>
+
+                            {mode === 'fixed' && (
+                                <button
+                                    onClick={() => {
+                                        if (!isAdmin) {
+                                            alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                            return;
+                                        }
+                                        setIsAttendanceModalOpen(true);
+                                    }}
+                                    className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-400"
+                                    title="출석 관리"
+                                >
+                                    <CheckCircle size={14} /> 출석 관리
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -2513,6 +2597,18 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                     <div className="mb-3">
                                         <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">매칭 대상 범위</h3>
                                     </div>
+                                {mode === 'fixed' ? (
+                                    <div className="p-4 bg-indigo-50 dark:bg-indigo-900/10 border-2 border-indigo-100 dark:border-indigo-900/30 rounded-2xl">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <Sparkles className="text-indigo-500" size={18} />
+                                            <span className="font-bold text-slate-700 dark:text-slate-200">고정 파티 자동 매칭</span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            출석이 확인된 모든 고정 멤버 및 부캐릭터를 대상으로 알고리즘 매칭을 수행합니다.<br />
+                                            (신청 시간 및 요일 제한을 무시합니다)
+                                        </p>
+                                    </div>
+                                ) : (
                                     <div className="grid grid-cols-1 gap-4">
                                         {/* 1. Global Match (All) */}
                                         <label className={cn(
@@ -2521,7 +2617,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                         )}>
                                             <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
                                                 checked={matchOptions.matchType === 'ALL'}
-                                                onChange={() => setMatchOptions(o => ({ ...o, matchType: 'ALL' }))} />
+                                                onChange={() => {
+                                                    if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                    setMatchOptions(o => ({ ...o, matchType: 'ALL' }))
+                                                }} />
                                             <div>
                                                 <span className="font-bold text-sm block mb-1 text-slate-700 dark:text-slate-200">전체 요일 매칭</span>
                                                 <p className="text-xs text-slate-500">전체 요일을 기준으로 알고리즘 매칭을 실행합니다.</p>
@@ -2535,7 +2634,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                         )}>
                                             <input type="radio" name="matchType" className="mt-1 accent-purple-500 w-4 h-4"
                                                 checked={matchOptions.matchType === 'SMART_ALL'}
-                                                onChange={() => setMatchOptions(o => ({ ...o, matchType: 'SMART_ALL' }))} />
+                                                onChange={() => {
+                                                    if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                    setMatchOptions(o => ({ ...o, matchType: 'SMART_ALL' }))
+                                                }} />
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <span className="font-bold text-sm text-slate-700 dark:text-slate-200">전체 요일 스마트 매칭 (Ver 2.0)</span>
@@ -2557,6 +2659,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
                                                     checked={matchOptions.matchType === 'DAY'}
                                                     onChange={() => {
+                                                        if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
                                                         setMatchOptions(o => ({ ...o, matchType: 'DAY' }));
                                                         if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
                                                     }} />
@@ -2576,6 +2679,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                 <button
                                                                     key={d}
                                                                     onClick={() => {
+                                                                        if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
                                                                         setMatchOptions(o => ({
                                                                             ...o,
                                                                             selectedDays: isSel
@@ -2598,6 +2702,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                     <div className="flex justify-end mt-2">
                                                         <button
                                                             onClick={() => {
+                                                                if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
                                                                 const allSelected = matchOptions.selectedDays.length === RAID_DAYS.length;
                                                                 setMatchOptions(o => ({ ...o, selectedDays: allSelected ? [] : [...RAID_DAYS] }));
                                                             }}
@@ -2614,6 +2719,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                             )}
                                         </div>
                                     </div>
+                                )}
                                 </section>
                             </div>
 
@@ -2665,6 +2771,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                             <div className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-slate-900">
                                 <DndContext
+                                    sensors={sensors}
                                     collisionDetection={closestCenter}
                                     onDragStart={handleAlgoDragStart}
                                     onDragOver={handleAlgoDragOver}
@@ -3119,6 +3226,93 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     </div>
                 )
             }
+
+            {/* Attendance Management Modal */}
+            {isAttendanceModalOpen && (
+                <div className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                                    <CheckCircle size={22} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <h3 className="font-bold text-slate-900 dark:text-white leading-tight">출석 관리 (고정 파티)</h3>
+                                    <p className="text-[11px] text-slate-500 mt-0.5">불참 인원을 체크하면 본캐 및 모든 부캐가 매칭에서 제외됩니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setIsAttendanceModalOpen(false)}
+                                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="p-4 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-100 dark:border-amber-900/20 px-6 py-3">
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
+                                ※ 고정 파티 멤버 중 이번 레이드에 참여하지 못하는 인원을 선택해 주세요.<br />
+                                선택된 유저의 <strong>모든 캐릭터(본캐+부캐)</strong>가 목록에서 사라집니다.
+                            </p>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2 max-h-[500px] custom-scrollbar">
+                            {allMembers.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(member => {
+                                const isExcluded = excludedOwners.includes(member.name);
+                                const memberSubCount = allSubChars.filter(s => s.ownerName === member.name).length;
+
+                                return (
+                                    <div
+                                        key={member.id}
+                                        className={cn(
+                                            "group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer",
+                                            isExcluded
+                                                ? "bg-rose-50 border-rose-100 dark:bg-rose-900/10 dark:border-rose-900/30"
+                                                : "bg-white border-slate-100 hover:border-indigo-200 dark:bg-slate-800 dark:border-slate-700"
+                                        )}
+                                        onClick={() => toggleAttendance(member.name)}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white shadow-sm", isExcluded ? "grayscale opacity-50 bg-slate-400" : getClassColor(member.class))}>
+                                                {member.class[0]}
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={cn("font-bold text-sm", isExcluded ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200")}>
+                                                        {member.name}
+                                                    </span>
+                                                    {memberSubCount > 0 && (
+                                                        <span className="text-[10px] bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full text-slate-500">
+                                                            부캐 {memberSubCount}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <span className="text-[11px] text-slate-400">{member.class} • {member.power.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className={cn(
+                                            "w-10 h-6 rounded-full p-1 transition-all flex items-center",
+                                            isExcluded ? "bg-rose-500 justify-end" : "bg-slate-200 dark:bg-slate-700 justify-start"
+                                        )}>
+                                            <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+                            <button
+                                onClick={() => setIsAttendanceModalOpen(false)}
+                                className="w-full py-3 rounded-xl font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none transition-all"
+                            >
+                                설정 저장 완료
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {
                 tooltipInfo && (

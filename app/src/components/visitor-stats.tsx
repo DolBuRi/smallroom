@@ -6,9 +6,11 @@ import { ref, onValue, set, onDisconnect, runTransaction, push, serverTimestamp 
 import { Users, BarChart3, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { useAppMode } from '@/context/ModeContext';
 
 export default function VisitorStats() {
     const { user, isAdmin } = useAuth();
+    const { dbPath } = useAppMode();
     const [onlineCount, setOnlineCount] = useState<number>(0);
     const [todayCount, setTodayCount] = useState<number>(0);
     const [todayAdminCount, setTodayAdminCount] = useState<number>(0);
@@ -24,9 +26,9 @@ export default function VisitorStats() {
         if (!mounted) return;
 
         const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-        const todayRef = ref(db, `statistics/daily/${todayStr}`);
-        const todayAdminRef = ref(db, `statistics/daily_admin/${todayStr}`);
-        const totalRef = ref(db, `statistics/total`);
+        const todayRef = ref(db, `${dbPath.statistics}/daily/${todayStr}`);
+        const todayAdminRef = ref(db, `${dbPath.statistics}/daily_admin/${todayStr}`);
+        const totalRef = ref(db, `${dbPath.statistics}/total`);
 
         // A. General Visitor Increment
         // We only run this check once on mount (or if date changed, theoretically)
@@ -68,7 +70,7 @@ export default function VisitorStats() {
         if (!mounted) return;
 
         const connectedRef = ref(db, '.info/connected');
-        const presenceListRef = ref(db, 'presence');
+        const presenceListRef = ref(db, dbPath.presence);
 
         // Use a new ref for this session/mount
         const myPresenceRef = push(presenceListRef);
