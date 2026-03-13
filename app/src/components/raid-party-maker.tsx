@@ -733,45 +733,39 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         isSub: true
                     })) : [];
 
-                    let roster = rosterRaw;
-                    let subList = subListRaw;
+                    // Derive dynamic fixedGroups based on subList ownerNames
+                    const groupedOwners = new Set<string>();
+                    subListRaw.forEach(s => {
+                        if (s.ownerName) groupedOwners.add(s.ownerName);
+                    });
+                    
+                    const roster = rosterRaw.map(m => ({
+                        ...m,
+                        fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
+                    }));
 
-                    if (mode === 'fixed') {
-                        // Derive dynamic fixedGroups based on subList ownerNames
-                        const groupedOwners = new Set<string>();
-                        subListRaw.forEach(s => {
-                            if (s.ownerName) groupedOwners.add(s.ownerName);
-                        });
+                    const subList = subListRaw.map(m => ({
+                        ...m,
+                        fixedGroupId: m.ownerName
+                    }));
+
+                    // Update fixedGroups UI State for the modal via DB
+                    get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
+                        const globalColors = colorSnap.exists() ? colorSnap.val() : {};
                         
-                        roster = rosterRaw.map(m => ({
-                            ...m,
-                            fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
-                        }));
-
-                        subList = subListRaw.map(m => ({
-                            ...m,
-                            fixedGroupId: m.ownerName
-                        }));
-
-                        // Update fixedGroups UI State for the modal via DB
-                        get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
-                            const globalColors = colorSnap.exists() ? colorSnap.val() : {};
+                        const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
+                            const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
+                            const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
                             
-                            const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
-                                const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
-                                const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
-                                
-                                return {
-                                    id: ownerName,
-                                    name: ownerName,
-                                    color: globalColors[ownerName] || colors[idx % colors.length],
-                                    memberIds: groupMembers
-                                };
-                            });
-                            setFixedGroups(dynamicFixedGroups);
+                            return {
+                                id: ownerName,
+                                name: ownerName,
+                                color: globalColors[ownerName] || colors[idx % colors.length],
+                                memberIds: groupMembers
+                            };
                         });
-                    }
-
+                        setFixedGroups(dynamicFixedGroups);
+                    });
 
                     setAllMembers(roster);
                     setAllSubChars(subList);
