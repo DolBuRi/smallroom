@@ -755,10 +755,17 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
                         const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
                         const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
+                        
+                        let savedColor = null;
+                        try {
+                            const groupColors = JSON.parse(localStorage.getItem('groupColors') || '{}');
+                            savedColor = groupColors[ownerName];
+                        } catch (e) {}
+
                         return {
                             id: ownerName,
                             name: ownerName,
-                            color: colors[idx % colors.length],
+                            color: savedColor || colors[idx % colors.length],
                             memberIds: groupMembers
                         };
                     });
@@ -2979,12 +2986,48 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                 <div className="flex flex-col h-full">
                                                     <div className="mb-4 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
                                                         <div className="flex items-center gap-2 flex-1">
-                                                            <div className={cn("w-4 h-4 rounded-full", selectedGroup?.color)} />
+                                                            <button
+                                                                onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+                                                                className={cn("w-4 h-4 rounded-full transition-transform hover:scale-125 focus:outline-none ring-2 ring-offset-2 ring-transparent focus:ring-indigo-500", selectedGroup?.color)}
+                                                                title="팀 색상 변경"
+                                                            />
                                                             <h4 className="font-bold text-lg select-none">
                                                                 {selectedGroup?.name}
                                                             </h4>
                                                         </div>
                                                     </div>
+
+                                                    {/* Color Picker (Toggled) */}
+                                                    {isColorPickerOpen && (
+                                                        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar animate-in slide-in-from-top-2 fade-in duration-200">
+                                                            {[
+                                                                'bg-slate-500', 'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
+                                                                'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500',
+                                                                'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500',
+                                                                'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500'
+                                                            ].map(color => (
+                                                                <button
+                                                                    key={color}
+                                                                    onClick={() => {
+                                                                        const newGroups = fixedGroups.map(fg =>
+                                                                            fg.id === selectedFixedGroupId ? { ...fg, color } : fg
+                                                                        );
+                                                                        setFixedGroups(newGroups);
+                                                                        try {
+                                                                            const groupColors = JSON.parse(localStorage.getItem('groupColors') || '{}');
+                                                                            groupColors[selectedFixedGroupId] = color;
+                                                                            localStorage.setItem('groupColors', JSON.stringify(groupColors));
+                                                                        } catch (e) {}
+                                                                    }}
+                                                                    className={cn(
+                                                                        "w-8 h-8 rounded-full shrink-0 transition-all border-2",
+                                                                        color,
+                                                                        selectedGroup?.color === color ? "border-slate-600 dark:border-white scale-110 shadow-lg ring-2 ring-offset-2 ring-indigo-500" : "border-transparent opacity-70 hover:opacity-100 hover:scale-105"
+                                                                    )}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    )}
 
                                                     {/* Member List */}
                                                     <div className="flex-1 overflow-y-auto space-y-2">
@@ -2994,7 +3037,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                             </div>
                                                         ) : (
                                                             selectedGroup?.memberIds.map(mid => {
-                                                                const member = allMembers.find(m => m.id === mid || m.name === mid);
+                                                                const member = [...allMembers, ...allSubChars].find(m => m.id === mid || m.name === mid);
                                                                 return (
                                                                     <div key={mid} className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
                                                                         <div className="flex items-center gap-2">
