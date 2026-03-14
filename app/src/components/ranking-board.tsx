@@ -249,12 +249,10 @@ export default function RankingBoard() {
                                 </div>
                             </div>
                         </div>
-                        {lastUpdated && (
-                            <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
-                                <Clock size={12} />
-                                마지막 전체 갱신: {formatRelativeTime(lastUpdated)}
-                            </span>
-                        )}
+                        <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
+                            <Clock size={12} />
+                            마지막 전체 갱신: {lastUpdated ? formatRelativeTime(lastUpdated) : '기록 없음'}
+                        </span>
                     </div>
                 </div>
 
@@ -382,16 +380,7 @@ export default function RankingBoard() {
                                         <span className="px-3 py-1 bg-slate-50 dark:bg-slate-700/50 text-slate-400 dark:text-indigo-200 text-[10px] font-black rounded-lg border border-slate-100 dark:border-slate-700 tracking-widest uppercase">{m.class}</span>
                                         {m.rank === '군단장' && <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 px-2 py-0.5 rounded-md font-black border border-amber-100 dark:border-amber-900/30 tracking-tight">군단장</span>}
                                         {(m.rank === '장교' || m.rank === '엘리트 장교') && <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black border border-indigo-100 dark:border-indigo-900/30 tracking-tight">장교</span>}
-                                        {mode === 'fixed' && m.faction && (
-                                            <span className={cn(
-                                                "text-[10px] px-2 py-0.5 rounded-md font-black border tracking-tight",
-                                                m.faction === '천족'
-                                                    ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 border-amber-100 dark:border-amber-900/30"
-                                                    : "bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border-purple-100 dark:border-purple-900/30"
-                                            )}>
-                                                {m.faction}
-                                            </span>
-                                        )}
+
                                     </div>
                                 </div>
 

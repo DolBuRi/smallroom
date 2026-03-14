@@ -23,6 +23,7 @@ import { useAppMode } from '@/context/ModeContext';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, get, child } from 'firebase/database';
 import { cn, getClassColor } from '@/lib/utils';
+import { AI_PROMPT_PLACEHOLDERS } from '@/constants/ui-texts';
 
 // --- Types ---
 interface Member {
@@ -37,6 +38,7 @@ interface Member {
     faction?: '천족' | '마족';
     ownerName?: string;
     isSub?: boolean;
+    raidOptIn?: boolean;
 }
 
 
@@ -399,7 +401,7 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
     );
 }
 
-function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDay, assignedTime }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[], assignedDay?: string, assignedTime?: string }) {
+function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, allSubChars, assignedDay, assignedTime, mode }: { member: Member, rect: DOMRect, fixedGroups?: FixedGroup[], allMembers: Member[], allSubChars: Member[], assignedDay?: string, assignedTime?: string, mode: 'legion' | 'fixed' }) {
     const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
     const tooltipWidth = 280;
     let top = rect.top;
@@ -430,7 +432,30 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
     };
 
     const fixedGroup = member.fixedGroupId ? fixedGroups?.find(g => g.id === member.fixedGroupId) : null;
-    const groupMembers = fixedGroup ? allMembers.filter(m => (fixedGroup.memberIds.some(id => normalize(id) === normalize(m.id) || normalize(id) === normalize(m.name))) && m.id !== member.id) : [];
+    
+    let displayMembers: (Member & { charLabel?: string })[] = [];
+    if (fixedGroup) {
+        if (mode === 'fixed') {
+            const ownerName = fixedGroup.id;
+            const mainChar = allMembers.find(m => m.name === ownerName);
+            const subChars = allSubChars.filter(s => s.ownerName === ownerName);
+
+            // 본캐 최상단 배치
+            if (mainChar) {
+                displayMembers.push({ ...mainChar, charLabel: '본캐' });
+            }
+
+            // 부캐 전투력 순 정렬
+            const sortedSubs = [...subChars].sort((a, b) => b.power - a.power);
+            displayMembers.push(...sortedSubs.map(s => ({ ...s, charLabel: '부캐' })));
+
+            // 현재 도구 설명 대상 멤버는 목록에서 제외
+            displayMembers = displayMembers.filter(m => m.id !== member.id);
+        } else {
+            // Legion 모드: 기존 로직 유지
+            displayMembers = allMembers.filter(m => (fixedGroup.memberIds.some(id => normalize(id) === normalize(m.id) || normalize(id) === normalize(m.name))) && m.id !== member.id);
+        }
+    }
 
     const isConflict = assignedDay && assignedTime && (!member.availability?.[assignedDay]?.includes(assignedTime));
     const slotLabel = assignedTime ? ([...WEEKDAY_SLOTS, ...WEEKEND_SLOTS].find(s => s.id === assignedTime)?.label || assignedTime) : '';
@@ -499,15 +524,18 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, assignedDa
                     {fixedGroup && (
                         <section className="pt-4 border-t border-slate-100 dark:border-slate-800">
                             <div className="flex items-center justify-between mb-2">
-                                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">고정 파티 ({fixedGroup.name})</h4>
+                                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{mode === 'fixed' ? '소유자' : '고정 파티'} ({fixedGroup.name})</h4>
                                 <div className={cn("w-2 h-2 rounded-full", fixedGroup.color)} />
                             </div>
                             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 space-y-2">
-                                {groupMembers.length > 0 ? groupMembers.map((gm, idx) => (
+                                {displayMembers.length > 0 ? displayMembers.map((gm, idx) => (
                                     <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
                                         <div className="flex items-center gap-2">
                                             <div className={cn("w-1.5 h-1.5 rounded-full", getClassColor(gm.class).split(' ')[0])} />
-                                            <span className="font-bold text-slate-700 dark:text-slate-300">{gm.name}</span>
+                                            <span className="font-bold text-slate-700 dark:text-slate-300">
+                                                {gm.name}
+                                                {gm.charLabel === '본캐' && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded font-black bg-indigo-100 text-indigo-500 dark:bg-indigo-900/30 dark:text-indigo-400">본캐</span>}
+                                            </span>
                                         </div>
                                         <span className="text-[10px] text-slate-400 font-medium">{gm.class}</span>
                                     </div>
@@ -552,6 +580,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     const [isAutoMatchModalOpen, setIsAutoMatchModalOpen] = useState(false);
     const [isAlgoSettingsModalOpen, setIsAlgoSettingsModalOpen] = useState(false);
     const [isFixedGroupModalOpen, setIsFixedGroupModalOpen] = useState(false);
+    const [fixedMatchType, setFixedMatchType] = useState<'ALGO' | 'SMART'>('ALGO');
+    const [fixedPrompt, setFixedPrompt] = useState<string>('');
     const [confirmationModal, setConfirmationModal] = useState<{
         isOpen: boolean;
         title?: string;
@@ -639,7 +669,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         if (mode === 'fixed') {
             const applicants: Member[] = [
                 ...allMembers.filter(m => !newExcluded.includes(m.name)),
-                ...allSubChars.filter(m => m.ownerName && !newExcluded.includes(m.ownerName))
+                ...allSubChars.filter(m => m.ownerName && !newExcluded.includes(m.ownerName) && m.raidOptIn !== false)
             ];
             setApplications(applicants);
         }
@@ -730,7 +760,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         id: m.id, name: m.name, class: m.class || '검성',
                         power: m.power || 0, score: m.score || 0, rank: '',
                         ownerName: m.ownerName,
-                        isSub: true
+                        isSub: true,
+                        raidOptIn: m.raidOptIn !== false
                     })) : [];
 
                     // Derive dynamic fixedGroups based on subList ownerNames
@@ -738,7 +769,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     subListRaw.forEach(s => {
                         if (s.ownerName) groupedOwners.add(s.ownerName);
                     });
-                    
+
                     const roster = rosterRaw.map(m => ({
                         ...m,
                         fixedGroupId: groupedOwners.has(m.name) ? m.name : undefined
@@ -754,11 +785,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     if (mode === 'fixed') {
                         get(ref(db, `${dbPath.settings}/groupColors`)).then((colorSnap) => {
                             const globalColors = colorSnap.exists() ? colorSnap.val() : {};
-                            
+                            setGroupColorsMap(globalColors);
+
                             const dynamicFixedGroups: FixedGroup[] = Array.from(groupedOwners).map((ownerName, idx) => {
                                 const colors = ['bg-rose-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500'];
                                 const groupMembers: string[] = [ownerName, ...subList.filter(s => s.ownerName === ownerName).map(s => s.name)];
-                                
+
                                 return {
                                     id: ownerName,
                                     name: ownerName,
@@ -782,9 +814,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                         if (mode === 'fixed') {
                             // In fixed mode, applications are derived from roster + subList
+                            // Only include characters with power >= 2700 as requested
                             const applicants: Member[] = [
                                 ...roster.filter(m => !excluded.includes(m.name)),
-                                ...subList.filter(m => m.ownerName && !excluded.includes(m.ownerName))
+                                ...subList.filter(m => m.ownerName && !excluded.includes(m.ownerName) && m.raidOptIn !== false)
                             ];
                             setApplications(applicants);
                         } else {
@@ -880,7 +913,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         }
 
         const assignedIds = new Set(parties.flatMap(p => (p.members || []).map(m => m.id)));
-        const newPool = applications.filter(a => !assignedIds.has(a.id) && a.power >= 2700);
+        const newPool = applications.filter(a => !assignedIds.has(a.id));
 
         // Apply UI Filters
         const uiFilteredPool = newPool.filter(m => {
@@ -1363,7 +1396,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                     const newIndex = party.members.findIndex(m => m.id === over.id);
                     if (oldIndex !== -1 && newIndex !== -1) {
                         party.members = arrayMove(party.members, oldIndex, newIndex);
-                        
+
                         saveMatchingState(newParties).then(success => {
                             if (success) {
                                 setParties(newParties);
@@ -1393,7 +1426,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
                 // 1. Fixed Group Smart Check: Check if duplicate owner ALWAYS
                 if (member.fixedGroupId) {
-                    const isDuplicate = mode === 'fixed' 
+                    const isDuplicate = mode === 'fixed'
                         ? [...p1.members, ...(p2?.members || [])].some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id)
                         : targetParty.members.some(pm => pm.fixedGroupId === member.fixedGroupId && pm.id !== member.id);
 
@@ -1402,7 +1435,17 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         setConfirmationModal({
                             isOpen: true,
                             isDanger: true,
-                            message: `선택한 ${scopeLabel}에 이미 동일한 계정 소유자(본캐/부캐 그룹)의 캐릭터가 있습니다.\n\n그래도 여기에 배치하시겠습니까?`,
+                            message: (
+                                <div className="space-y-3">
+                                    <p>
+                                        선택한 {scopeLabel}에 이미 동일한 <span className="font-bold"><br />계정 소유자(본캐/부캐)</span>의
+                                        캐릭터가 있습니다.
+                                    </p>
+                                    <p className="font-bold">
+                                        그래도 여기에 배치하시겠습니까?
+                                    </p>
+                                </div>
+                            ),
                             onConfirm: () => {
                                 executeMove(memberId, targetId);
                                 setConfirmationModal(prev => ({ ...prev, isOpen: false }));
@@ -1411,6 +1454,30 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         });
                         return;
                     }
+                }
+
+                // 1.5 Low Power Warning Config for Fixed Mode
+                if (mode === 'fixed' && (member.power || 0) < 2700) {
+                    setConfirmationModal({
+                        isOpen: true,
+                        isDanger: true,
+                        message: (
+                            <div className="space-y-3">
+                                <p>
+                                    선택한 캐릭터(<span className="font-bold text-rose-500">{member.name}</span>)의 <br />전투력이 2700 미만입니다.
+                                </p>
+                                <p className="font-bold">
+                                    수동으로 편성을 진행하시겠습니까?
+                                </p>
+                            </div>
+                        ),
+                        onConfirm: () => {
+                            executeMove(memberId, targetId);
+                            setConfirmationModal(prev => ({ ...prev, isOpen: false }));
+                        },
+                        onCancel: () => setConfirmationModal(prev => ({ ...prev, isOpen: false }))
+                    });
+                    return;
                 }
 
                 // 2. Time Validation (Only for legion mode)
@@ -1521,7 +1588,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         partiesToMatch.forEach((p, pIdx) => {
             const forceIdx = Math.floor(pIdx / 2);
             const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
-            
+
             const checkCollision = (m: Member) => {
                 if (!m.fixedGroupId) return true;
                 if (mode === 'fixed') {
@@ -1679,7 +1746,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const p = partiesToMatch[pIdx];
             const forceIdx = Math.floor(pIdx / 2);
             const forceParties = [partiesToMatch[forceIdx * 2], partiesToMatch[forceIdx * 2 + 1]].filter(Boolean);
-            
+
             for (let i = 0; i < sorted.length; i++) {
                 const m = sorted[i];
                 const isCleric = m.class === '치유성';
@@ -2365,6 +2432,12 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
     };
 
     const filteredPool = pool.filter(m => {
+        if (mode === 'fixed') {
+            if (selectedDay === '2700+') return (m.power || 0) >= 2700;
+            if (selectedDay === '2700 미만') return (m.power || 0) < 2700;
+            return true;
+        }
+
         // Time Slot Logic (Only Filter)
         if (selectedDay !== 'ALL' && !selectedSlot) {
             if (!m.availability?.[selectedDay]) return false;
@@ -2421,7 +2494,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         <div className="flex gap-1">
                             <button
                                 onClick={() => {
-                                    if (!isAdmin) {
+                                    if (mode !== 'fixed' && !isAdmin) {
                                         alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
                                         return;
                                     }
@@ -2436,10 +2509,6 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                             {mode === 'fixed' && (
                                 <button
                                     onClick={() => {
-                                        if (!isAdmin) {
-                                            alert("관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                            return;
-                                        }
                                         setIsAttendanceModalOpen(true);
                                     }}
                                     className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1 dark:bg-indigo-900/20 dark:border-indigo-800 dark:text-indigo-400"
@@ -2467,24 +2536,41 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 >
                                     전체
                                 </button>
-                                {RAID_DAYS.map((d, i) => (
-                                    <button
-                                        key={d}
-                                        onClick={() => setSelectedDay(d)}
-                                        className={cn(
-                                            "flex-1 h-10 text-sm font-bold transition-all border border-r-0 last:border-r flex items-center justify-center",
-                                            selectedDay === d
-                                                ? "bg-indigo-600 text-white border-indigo-600 z-10"
-                                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-                                        )}
-                                    >
-                                        {d}
-                                    </button>
-                                ))}
+                                {mode === 'fixed' ? (
+                                    ['2700+', '2700 미만'].map((d) => (
+                                        <button
+                                            key={d}
+                                            onClick={() => setSelectedDay(d)}
+                                            className={cn(
+                                                "flex-1 h-10 text-sm font-bold transition-all border border-r-0 last:border-r flex items-center justify-center",
+                                                selectedDay === d
+                                                    ? "bg-indigo-600 text-white border-indigo-600 z-10"
+                                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                            )}
+                                        >
+                                            {d}
+                                        </button>
+                                    ))
+                                ) : (
+                                    RAID_DAYS.map((d, i) => (
+                                        <button
+                                            key={d}
+                                            onClick={() => setSelectedDay(d)}
+                                            className={cn(
+                                                "flex-1 h-10 text-sm font-bold transition-all border border-r-0 last:border-r flex items-center justify-center",
+                                                selectedDay === d
+                                                    ? "bg-indigo-600 text-white border-indigo-600 z-10"
+                                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                            )}
+                                        >
+                                            {d}
+                                        </button>
+                                    ))
+                                )}
                             </div>
 
                             {/* Divider & Time Slots (Switch based on Day) */}
-                            {selectedDay !== 'ALL' ? (
+                            {mode !== 'fixed' && selectedDay !== 'ALL' ? (
                                 <>
                                     <div className="h-px bg-slate-100 dark:bg-slate-800 w-full" />
 
@@ -2771,129 +2857,191 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                     <div className="mb-3">
                                         <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">매칭 대상 범위</h3>
                                     </div>
-                                {mode === 'fixed' ? (
-                                    <div className="p-4 bg-indigo-50 dark:bg-indigo-900/10 border-2 border-indigo-100 dark:border-indigo-900/30 rounded-2xl">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <Sparkles className="text-indigo-500" size={18} />
-                                            <span className="font-bold text-slate-700 dark:text-slate-200">고정 파티 자동 매칭</span>
-                                        </div>
-                                        <p className="text-xs text-slate-500 leading-relaxed">
-                                            출석이 확인된 모든 고정 멤버 및 부캐릭터를 대상으로 알고리즘 매칭을 수행합니다.<br />
-                                            (신청 시간 및 요일 제한을 무시합니다)
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 gap-4">
-                                        {/* 1. Global Match (All) */}
-                                        <label className={cn(
-                                            "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
-                                            matchOptions.matchType === 'ALL' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
-                                        )}>
-                                            <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
-                                                checked={matchOptions.matchType === 'ALL'}
-                                                onChange={() => {
-                                                    if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                                    setMatchOptions(o => ({ ...o, matchType: 'ALL' }))
-                                                }} />
-                                            <div>
-                                                <span className="font-bold text-sm block mb-1 text-slate-700 dark:text-slate-200">전체 요일 매칭</span>
-                                                <p className="text-xs text-slate-500">전체 요일을 기준으로 알고리즘 매칭을 실행합니다.</p>
-                                            </div>
-                                        </label>
-
-                                        {/* 1.5 AI Smart Match (ALL) */}
-                                        <label className={cn(
-                                            "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
-                                            matchOptions.matchType === 'SMART_ALL' ? "border-purple-500 bg-purple-50/30 dark:bg-purple-900/10" : "border-slate-100 dark:border-slate-800"
-                                        )}>
-                                            <input type="radio" name="matchType" className="mt-1 accent-purple-500 w-4 h-4"
-                                                checked={matchOptions.matchType === 'SMART_ALL'}
-                                                onChange={() => {
-                                                    if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                                    setMatchOptions(o => ({ ...o, matchType: 'SMART_ALL' }))
-                                                }} />
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="font-bold text-sm text-slate-700 dark:text-slate-200">전체 요일 스마트 매칭 (Ver 2.0)</span>
-                                                    <span className="text-[9px] bg-purple-500 text-white px-1.5 py-0.5 rounded-full font-black animate-pulse">AI</span>
+                                    {mode === 'fixed' ? (
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {/* Option 1: 알고리즘 기반 매칭 */}
+                                            <div
+                                                onClick={() => setFixedMatchType('ALGO')}
+                                                className={cn(
+                                                    "p-5 border-2 rounded-2xl relative overflow-hidden cursor-pointer transition-all duration-300",
+                                                    fixedMatchType === 'ALGO'
+                                                        ? "bg-indigo-50/40 dark:bg-indigo-900/10 border-indigo-500 shadow-lg shadow-indigo-500/5"
+                                                        : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-indigo-200"
+                                                )}
+                                            >
+                                                <div className="relative">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <input
+                                                            type="radio"
+                                                            checked={fixedMatchType === 'ALGO'}
+                                                            onChange={() => setFixedMatchType('ALGO')}
+                                                            className="w-4 h-4 accent-indigo-500"
+                                                        />
+                                                        <span className="font-bold text-sm text-slate-800 dark:text-slate-100">알고리즘 기반 매칭</span>
+                                                    </div>
+                                                    <div className="space-y-1.5 pl-7">
+                                                        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                                                            설정된 <span className="text-indigo-500 font-bold">알고리즘 카드</span>를 기반으로 매칭을 수행합니다.
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <p className="text-xs text-slate-500 leading-relaxed">
-                                                    수십만 번의 시뮬레이션을 통해 필수 조건을 모두 충족하는<br />
-                                                    최적의 전체 요일 조합을 찾습니다.
-                                                </p>
                                             </div>
-                                        </label>
 
-                                        {/* 2. Selective Match (Day) */}
-                                        <div className={cn(
-                                            "flex flex-col p-4 rounded-2xl border-2 transition-all",
-                                            matchOptions.matchType === 'DAY' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
-                                        )}>
-                                            <label className="flex items-start gap-4 cursor-pointer">
+                                            {/* Option 2: 스마트 매칭 */}
+                                            <div
+                                                onClick={() => setFixedMatchType('SMART')}
+                                                className={cn(
+                                                    "p-5 border-2 rounded-2xl relative overflow-hidden transition-all duration-300",
+                                                    fixedMatchType === 'SMART'
+                                                        ? "bg-purple-50/40 dark:bg-purple-900/10 border-purple-500 shadow-lg shadow-purple-500/5"
+                                                        : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-purple-200 cursor-pointer"
+                                                )}
+                                            >
+                                                {fixedMatchType === 'SMART' && (
+                                                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-purple-200/30 to-transparent dark:from-purple-500/10 rounded-full blur-2xl animate-pulse" />
+                                                )}
+                                                <div className="relative">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <input
+                                                            type="radio"
+                                                            checked={fixedMatchType === 'SMART'}
+                                                            onChange={() => setFixedMatchType('SMART')}
+                                                            className="w-4 h-4 accent-purple-500"
+                                                        />
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-sm text-slate-800 dark:text-slate-100">스마트 매칭</span>
+                                                            <span className="text-[9px] bg-gradient-to-r from-indigo-500 to-purple-500 text-white px-2 py-0.5 rounded-full font-black animate-pulse shadow-sm shadow-purple-500/20">AI</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-3 pl-7">
+                                                        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                                                            <span className="text-purple-500 font-bold">프롬프트 입력</span>을 통해 맞춤형 매칭을 진행합니다.
+                                                        </p>
+
+                                                        <div className={cn("transition-all duration-300", fixedMatchType !== 'SMART' && "opacity-60 grayscale-[0.5]")}>
+                                                            <textarea
+                                                                value={fixedPrompt}
+                                                                onChange={(e) => setFixedPrompt(e.target.value)}
+                                                                placeholder={AI_PROMPT_PLACEHOLDERS.FIXED_PARTY}
+                                                                className="w-full h-24 p-3 text-xs bg-white/50 dark:bg-slate-900/50 border border-purple-100 dark:border-purple-900/30 rounded-xl focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 outline-none transition-all placeholder:text-slate-400 resize-none"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {/* 1. Global Match (All) */}
+                                            <label className={cn(
+                                                "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
+                                                matchOptions.matchType === 'ALL' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
+                                            )}>
                                                 <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
-                                                    checked={matchOptions.matchType === 'DAY'}
+                                                    checked={matchOptions.matchType === 'ALL'}
                                                     onChange={() => {
                                                         if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                                        setMatchOptions(o => ({ ...o, matchType: 'DAY' }));
-                                                        if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
+                                                        setMatchOptions(o => ({ ...o, matchType: 'ALL' }))
                                                     }} />
-                                                <div className="flex-1">
-                                                    <span className="font-bold text-sm block mb-1 text-slate-700 dark:text-slate-200">선택 요일 매칭</span>
-                                                    <p className="text-xs text-slate-500 mb-3">선택한 요일만 대상으로 하여 알고리즘 매칭을 실행합니다.</p>
+                                                <div>
+                                                    <span className="font-bold text-sm block mb-1 text-slate-700 dark:text-slate-200">전체 요일 매칭</span>
+                                                    <p className="text-xs text-slate-500">전체 요일을 기준으로 알고리즘 매칭을 실행합니다.</p>
                                                 </div>
                                             </label>
 
-                                            {/* Day Selector (Conditional) */}
-                                            {matchOptions.matchType === 'DAY' && (
-                                                <div className="mt-4 animate-in slide-in-from-top-2 duration-300">
-                                                    <div className="grid grid-cols-7 gap-1">
-                                                        {RAID_DAYS.map((d) => {
-                                                            const isSel = matchOptions.selectedDays.includes(d);
-                                                            return (
-                                                                <button
-                                                                    key={d}
-                                                                    onClick={() => {
-                                                                        if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                                                        setMatchOptions(o => ({
-                                                                            ...o,
-                                                                            selectedDays: isSel
-                                                                                ? o.selectedDays.filter(day => day !== d)
-                                                                                : [...o.selectedDays, d]
-                                                                        }));
-                                                                    }}
-                                                                    className={cn(
-                                                                        "h-10 rounded-lg text-sm font-bold transition-all border",
-                                                                        isSel
-                                                                            ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                                                                            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-indigo-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                                                                    )}
-                                                                >
-                                                                    {d}
-                                                                </button>
-                                                            );
-                                                        })}
+                                            {/* 1.5 AI Smart Match (ALL) */}
+                                            <label className={cn(
+                                                "flex items-start gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800",
+                                                matchOptions.matchType === 'SMART_ALL' ? "border-purple-500 bg-purple-50/30 dark:bg-purple-900/10" : "border-slate-100 dark:border-slate-800"
+                                            )}>
+                                                <input type="radio" name="matchType" className="mt-1 accent-purple-500 w-4 h-4"
+                                                    checked={matchOptions.matchType === 'SMART_ALL'}
+                                                    onChange={() => {
+                                                        if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                        setMatchOptions(o => ({ ...o, matchType: 'SMART_ALL' }))
+                                                    }} />
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="font-bold text-sm text-slate-700 dark:text-slate-200">전체 요일 스마트 매칭 (Ver 2.0)</span>
+                                                        <span className="text-[9px] bg-purple-500 text-white px-1.5 py-0.5 rounded-full font-black animate-pulse">AI</span>
                                                     </div>
-                                                    <div className="flex justify-end mt-2">
-                                                        <button
-                                                            onClick={() => {
-                                                                if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
-                                                                const allSelected = matchOptions.selectedDays.length === RAID_DAYS.length;
-                                                                setMatchOptions(o => ({ ...o, selectedDays: allSelected ? [] : [...RAID_DAYS] }));
-                                                            }}
-                                                            className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex items-center gap-1 px-1"
-                                                        >
-                                                            {matchOptions.selectedDays.length === RAID_DAYS.length ? (
-                                                                <><XCircle size={12} /> 전체 해제</>
-                                                            ) : (
-                                                                <><CheckCircle2 size={12} /> 전체 선택</>
-                                                            )}
-                                                        </button>
-                                                    </div>
+                                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                                        수십만 번의 시뮬레이션을 통해 필수 조건을 모두 충족하는<br />
+                                                        최적의 전체 요일 조합을 찾습니다.
+                                                    </p>
                                                 </div>
-                                            )}
+                                            </label>
+
+                                            {/* 2. Selective Match (Day) */}
+                                            <div className={cn(
+                                                "flex flex-col p-4 rounded-2xl border-2 transition-all",
+                                                matchOptions.matchType === 'DAY' ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"
+                                            )}>
+                                                <label className="flex items-start gap-4 cursor-pointer">
+                                                    <input type="radio" name="matchType" className="mt-1 accent-indigo-500 w-4 h-4"
+                                                        checked={matchOptions.matchType === 'DAY'}
+                                                        onChange={() => {
+                                                            if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                            setMatchOptions(o => ({ ...o, matchType: 'DAY' }));
+                                                            if (selectedDay === 'ALL') setSelectedDay('수'); // Default to Wed if none selected
+                                                        }} />
+                                                    <div className="flex-1">
+                                                        <span className="font-bold text-sm block mb-1 text-slate-700 dark:text-slate-200">선택 요일 매칭</span>
+                                                        <p className="text-xs text-slate-500 mb-3">선택한 요일만 대상으로 하여 알고리즘 매칭을 실행합니다.</p>
+                                                    </div>
+                                                </label>
+
+                                                {/* Day Selector (Conditional) */}
+                                                {matchOptions.matchType === 'DAY' && (
+                                                    <div className="mt-4 animate-in slide-in-from-top-2 duration-300">
+                                                        <div className="grid grid-cols-7 gap-1">
+                                                            {RAID_DAYS.map((d) => {
+                                                                const isSel = matchOptions.selectedDays.includes(d);
+                                                                return (
+                                                                    <button
+                                                                        key={d}
+                                                                        onClick={() => {
+                                                                            if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                                            setMatchOptions(o => ({
+                                                                                ...o,
+                                                                                selectedDays: isSel
+                                                                                    ? o.selectedDays.filter(day => day !== d)
+                                                                                    : [...o.selectedDays, d]
+                                                                            }));
+                                                                        }}
+                                                                        className={cn(
+                                                                            "h-10 rounded-lg text-sm font-bold transition-all border",
+                                                                            isSel
+                                                                                ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                                                                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-indigo-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                                                                        )}
+                                                                    >
+                                                                        {d}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="flex justify-end mt-2">
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (!isAdmin) return alert("매칭 옵션을 변경하려면 관리자 권한이 필요합니다.\n(좌측 하단에서 로그인을 진행해주세요)");
+                                                                    const allSelected = matchOptions.selectedDays.length === RAID_DAYS.length;
+                                                                    setMatchOptions(o => ({ ...o, selectedDays: allSelected ? [] : [...RAID_DAYS] }));
+                                                                }}
+                                                                className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex items-center gap-1 px-1"
+                                                            >
+                                                                {matchOptions.selectedDays.length === RAID_DAYS.length ? (
+                                                                    <><XCircle size={12} /> 전체 해제</>
+                                                                ) : (
+                                                                    <><CheckCircle2 size={12} /> 전체 선택</>
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
                                 </section>
                             </div>
 
@@ -2913,7 +3061,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                             handleAutoMatch();
                                         }
                                     }}
-                                    className="px-8 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2"
+                                    className="px-8 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all transform active:scale-95 flex items-center gap-2"
                                 >
                                     <Sparkles size={18} />매칭 실행
                                 </button>
@@ -3188,10 +3336,10 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                                             fg.id === selectedFixedGroupId ? { ...fg, color } : fg
                                                                         );
                                                                         setFixedGroups(newGroups);
-                                                                        
-                                                                        // Sync globally
+
                                                                         if (selectedFixedGroupId) {
                                                                             const colorMap = { ...groupColorsMap, [selectedFixedGroupId]: color };
+                                                                            setGroupColorsMap(colorMap);
                                                                             set(ref(db, `${dbPath.settings}/groupColors`), colorMap);
                                                                         }
                                                                     }}
@@ -3206,31 +3354,31 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                     )}
 
                                                     {/* Member List */}
-                                                        <div className="flex-1 overflow-y-auto space-y-2">
-                                                            {/* Add Member Input (Legion only) */}
-                                                            {mode === 'legion' && (
-                                                                <div className="relative mb-4 group">
-                                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
-                                                                    <input
-                                                                        type="text"
-                                                                        placeholder="멤버 추가 (닉네임 입력 후 엔터)"
-                                                                        className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 transition-all"
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter') {
-                                                                                const name = e.currentTarget.value.trim();
-                                                                                if (name && !selectedGroup.memberIds.includes(name)) {
-                                                                                    const updated = fixedGroups.map(g =>
-                                                                                        g.id === selectedFixedGroupId ? { ...g, memberIds: [...g.memberIds, name] } : g
-                                                                                    );
-                                                                                    set(ref(db, dbPath.fixedGroups), updated);
-                                                                                    e.currentTarget.value = '';
-                                                                                }
+                                                    <div className="flex-1 overflow-y-auto space-y-2">
+                                                        {/* Add Member Input (Legion only) */}
+                                                        {mode === 'legion' && (
+                                                            <div className="relative mb-4 group">
+                                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="멤버 추가 (닉네임 입력 후 엔터)"
+                                                                    className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            const name = e.currentTarget.value.trim();
+                                                                            if (name && !selectedGroup.memberIds.includes(name)) {
+                                                                                const updated = fixedGroups.map(g =>
+                                                                                    g.id === selectedFixedGroupId ? { ...g, memberIds: [...g.memberIds, name] } : g
+                                                                                );
+                                                                                set(ref(db, dbPath.fixedGroups), updated);
+                                                                                e.currentTarget.value = '';
                                                                             }
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                            {selectedGroup?.memberIds.length === 0 ? (
+                                                                        }
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        {selectedGroup?.memberIds.length === 0 ? (
                                                             <div className="h-40 flex flex-col items-center justify-center text-slate-400 opacity-60">
                                                                 <p className="text-sm">등록된 멤버가 없습니다.</p>
                                                             </div>
@@ -3456,6 +3604,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         rect={tooltipInfo!.rect}
                         fixedGroups={fixedGroups}
                         allMembers={allMembers}
+                        allSubChars={allSubChars}
+                        mode={mode as any}
                     />
                 )
             }

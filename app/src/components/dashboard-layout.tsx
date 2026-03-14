@@ -5,6 +5,8 @@ import { Users, Trophy, Sword, Calendar, LayoutDashboard, LogIn, LogOut, Calcula
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
 import { cn } from '@/lib/utils';
+import { db } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
 import RaidManager from '@/components/raid-manager';
 import RaidManagerV2 from '@/components/raid-manager-v2';
 import MemberList from '@/components/member-list';
@@ -36,6 +38,22 @@ export default function DashboardLayout() {
 
   const [debugClicks, setDebugClicks] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [verifyInput, setVerifyInput] = useState('');
+  const [fixedMembersNames, setFixedMembersNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Fetch fixed members for verification
+    const fixedMembersRef = ref(db, 'fixed_members');
+    const unsubscribe = onValue(fixedMembersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const names = Object.values(data).map((m: any) => m.name);
+        setFixedMembersNames(names.filter(n => n && n !== '부트띠'));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     // Initialize Dark Mode
@@ -54,19 +72,25 @@ export default function DashboardLayout() {
     else document.documentElement.classList.remove('dark');
   };
 
-  const [bunnyClicks, setBunnyClicks] = useState(0);
-
   const handleBunnyClick = () => {
-    const newClicks = bunnyClicks + 1;
-    setBunnyClicks(newClicks);
-    if (newClicks === 5) {
-      if (debugClicks >= 5) {
-        setDebugClicks(0); 
-        alert("개발자 모드 비활성화.");
-      } else {
-        alert("개발자 모드 상태가 아닙니다");
-      }
-      setBunnyClicks(0);
+    setIsVerifyModalOpen(true);
+  };
+
+  const handleVerify = () => {
+    const trimmed = verifyInput.trim();
+    if (!trimmed) return;
+
+    if (trimmed === '부트띠') {
+      alert("부트띠 외 다른 고정 멤버의 닉네임을 입력해 주세요.");
+      return;
+    }
+
+    if (fixedMembersNames.includes(trimmed)) {
+      setIsVerifyModalOpen(false);
+      setVerifyInput('');
+      window.location.href = '/fixed-party';
+    } else {
+      alert("검증에 실패했습니다. 올바른 닉네임을 입력해주세요.");
     }
   };
 
@@ -164,7 +188,7 @@ export default function DashboardLayout() {
               성역 파티 매칭
             </NavButton>
 
-            <div className="w-full h-px bg-slate-100 dark:bg-slate-800 my-4" /> 
+            <div className="w-full h-px bg-slate-100 dark:bg-slate-800 my-4" />
 
             <NavButton active={activeTab === 'alerter_integration'} onClick={() => setActiveTab('alerter_integration')} icon={<Bell size={20} />}>
               아이온2 알리미 연동
@@ -218,47 +242,60 @@ export default function DashboardLayout() {
         </section>
       </div>
 
-      {/* Login Modal */}
-      {isLoginModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 p-8">
-            <h3 className="text-2xl font-black text-slate-900 mb-6 text-center">관리자 로그인</h3>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1 pl-1">아이디</label>
-                <input
-                  type="text"
-                  value={loginId}
-                  onChange={(e) => setLoginId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                  placeholder="아이디를 입력하세요"
-                  autoFocus
-                />
+      {/* Verification Modal */}
+      {isVerifyModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-10 flex flex-col items-center text-center">
+              <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center text-indigo-500 mb-6 shadow-sm">
+                <Shield size={40} className="stroke-[2.5px]" />
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1 pl-1">비밀번호</label>
-                <input
-                  type="password"
-                  value={loginPw}
-                  onChange={(e) => setLoginPw(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono"
-                  placeholder="비밀번호를 입력하세요"
-                />
+              <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">
+                {mode === 'fixed' ? (
+                  <>길드 사이트로 <br />이동하시겠습니까?</>
+                ) : (
+                  <>고정파티 관리 페이지로 <br />이동하시겠습니까?</>
+                )}
+              </h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 font-medium">
+                {mode === 'fixed' ? '길드원 전용 메인 페이지로 이동합니다.' : (
+                  <>권한 확인을 위해 부트띠 파티 멤버 중 <br />한 명의 본캐 닉네임을 입력해 주세요.</>
+                )}
+              </p>
+
+              <div className="w-full space-y-4">
+                {mode !== 'fixed' && (
+                  <input
+                    type="text"
+                    value={verifyInput}
+                    onChange={(e) => setVerifyInput(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-4 font-black focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-center placeholder:font-bold"
+                    placeholder="닉네임 입력"
+                    onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+                    autoFocus
+                  />
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsVerifyModalOpen(false);
+                      setVerifyInput('');
+                    }}
+                    className="flex-1 py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-black rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={mode === 'fixed' ? () => window.location.href = '/' : handleVerify}
+                    disabled={mode !== 'fixed' && !verifyInput}
+                    className="flex-1 py-4 bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-500/20 hover:bg-indigo-600 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    확인
+                  </button>
+                </div>
               </div>
-              <button
-                type="submit"
-                disabled={isLoggingIn || !loginId || !loginPw}
-                className="w-full bg-indigo-500 text-white font-black py-4 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-600 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 mt-4"
-              >
-                {isLoggingIn ? '로그인 중...' : '로그인'}
-              </button>
-            </form>
-            <button
-              onClick={() => setIsLoginModalOpen(false)}
-              className="w-full text-slate-400 text-xs font-bold mt-4 hover:text-slate-600 transition-colors"
-            >
-              닫기
-            </button>
+            </div>
           </div>
         </div>
       )}

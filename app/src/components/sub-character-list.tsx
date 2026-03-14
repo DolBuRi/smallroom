@@ -11,6 +11,7 @@ import { SERVER_LIST, GuildMember } from './member-list';
 
 interface SubCharacter extends Omit<GuildMember, 'rank' | 'clearCount' | 'isActive'> {
     ownerName: string;
+    raidOptIn?: boolean;
 }
 
 const CLASSES = ['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
@@ -50,6 +51,7 @@ export default function SubCharacterList() {
     const [searchResult, setSearchResult] = useState<SubCharacter | null | 'not-found'>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [isBatchRunning, setIsBatchRunning] = useState(false);
+    const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
 
     useEffect(() => {
         if (loading) return;
@@ -59,11 +61,21 @@ export default function SubCharacterList() {
         const unsubscribeSub = onValue(subCharsRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                const list = Object.entries(data).map(([id, val]: [string, any]) => ({
-                    id,
-                    ...val
+                const list = Object.entries(data).map(([key, val]: [string, any]) => ({
+                    ...val,
+                    id: key
                 }));
-                setSubChars(list);
+
+                // Deduplicate by name if duplicates exist
+                const uniqueList = Array.from(new Map(list.map(item => [item.name, item])).values());
+                setSubChars(uniqueList);
+
+                // Auto-cleanup duplicates from Firebase if any
+                if (list.length !== uniqueList.length) {
+                    const uniqueKeys = new Set(uniqueList.map(u => u.id));
+                    const duplicates = list.filter(item => !uniqueKeys.has(item.id));
+                    duplicates.forEach(d => remove(ref(db, `${dbPath.subCharacters}/${d.id}`)));
+                }
             } else {
                 setSubChars([]);
             }
@@ -97,40 +109,54 @@ export default function SubCharacterList() {
 
     const handleRefreshAll = async () => {
         if (isBatchRunning) return;
-        if (!confirm(`전체 ${subChars.length}명의 정보를 갱신하시겠습니까?`)) return;
+        if (!confirm(`전체 ${subChars.length}명의 정보를 갱신하시겠습니까?\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
 
         setIsBatchRunning(true);
-        for (let i = 0; i < subChars.length; i++) {
-            const char = subChars[i];
+        const validChars = subChars.filter(c => c && c.name);
+        let updatedList = [...subChars];
+        let successCount = 0;
+
+        for (let i = 0; i < validChars.length; i++) {
+            const char = validChars[i];
+            setProgress({ current: i + 1, total: validChars.length, status: '갱신 중...' });
+
             try {
-                const res = await fetch('/api/proxy/scrape', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: char.name, serverId: '1006' }) // 서버 정보가 없으면 기본 아리엘
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.success) {
-                        await set(ref(db, `${dbPath.subCharacters}/${char.id}`), {
-                            ...char,
-                            power: data.data.power,
-                            score: data.data.score,
-                            class: data.data.class,
-                            guild: data.data.guild,
-                            lastUpdated: new Date().toISOString()
-                        });
-                    }
+                const targetServerId = char.server ? (SERVER_LIST.find(s => s.name === char.server)?.id || '1006') : '1006';
+                const res = await scrapeMember(char.name, targetServerId);
+                if (res.success && res.data) {
+                    updatedList = updatedList.map(c => c.id === char.id ? {
+                        ...c,
+                        power: parseInt(res.data.power) || 0,
+                        score: parseInt(res.data.score) || 0,
+                        class: res.data.class,
+                        guild: res.data.guild,
+                        lastUpdated: new Date().toISOString()
+                    } : c);
+                    successCount++;
                 }
             } catch (e) { }
-            await new Promise(r => setTimeout(r, 2000));
+            if (i < validChars.length - 1) await new Promise(r => setTimeout(r, 4000));
         }
-        setIsBatchRunning(false);
+
         try {
+            // 한 번에 덮어쓰기 위해 Map 형태로 변환 (Firebase 딕셔너리 구조 유지)
+            const updatesMap: Record<string, any> = {};
+            updatedList.forEach(c => {
+                const { id, ...rest } = c;
+                updatesMap[id] = { id, ...rest };
+            });
+
+            await set(ref(db, dbPath.subCharacters), updatesMap);
             await set(ref(db, dbPath.subCharsLastRefresh), new Date().toISOString());
+            setSubChars(updatedList); // Update local state directly
         } catch (e) {
-            console.error("Failed to save refresh timestamp:", e);
+            console.error("Failed to save refreshed batch data:", e);
+            alert("갱신된 정보 저장 실패!");
+        } finally {
+            setIsBatchRunning(false);
+            setProgress({ current: 0, total: 0, status: '' });
+            alert(`갱신 완료! (성공: ${successCount}/${validChars.length})`);
         }
-        alert("갱신이 완료되었습니다.");
     };
 
     const scrapeMember = async (name: string, serverId: string = '1006') => {
@@ -242,12 +268,12 @@ export default function SubCharacterList() {
             if (!groups[c.ownerName]) groups[c.ownerName] = [];
             groups[c.ownerName].push(c);
         });
-        
+
         // 전투력 내림차순 정렬
         Object.values(groups).forEach(list => {
             list.sort((a, b) => b.power - a.power);
         });
-        
+
         return groups;
     }, [subChars]);
 
@@ -255,14 +281,14 @@ export default function SubCharacterList() {
         const groups: Record<string, SubCharacter[]> = {};
         CLASSES.forEach(cls => groups[cls] = []);
         subChars.forEach(c => {
-            if (groups[c.class] && (c.power || 0) >= 2700) groups[c.class].push(c);
+            if (groups[c.class] && (c.power || 0) >= 2700 && c.raidOptIn !== false) groups[c.class].push(c);
         });
-        
+
         // 전투력 내림차순 정렬
         Object.values(groups).forEach(list => {
             list.sort((a, b) => b.power - a.power);
         });
-        
+
         return groups;
     }, [subChars]);
 
@@ -274,7 +300,7 @@ export default function SubCharacterList() {
             if (stats[m.class] && (m.power || 0) >= 2700) stats[m.class].main++;
         });
         subChars.forEach(c => {
-            if (stats[c.class] && (c.power || 0) >= 2700) stats[c.class].sub++;
+            if (stats[c.class] && (c.power || 0) >= 2700 && c.raidOptIn !== false) stats[c.class].sub++;
         });
         return stats;
     }, [mainMembers, subChars]);
@@ -291,7 +317,7 @@ export default function SubCharacterList() {
                     <div className="flex items-center gap-4 mt-3 font-medium">
                         <div className="text-slate-500 dark:text-slate-300 text-sm flex items-center gap-2">
                             <Users size={14} className="text-indigo-400" />
-                            {subChars.length}명의 부캐릭터 목록입니다.
+                            {subChars.length}개의 부캐릭터가 존재합니다.
                             <div className="group relative flex items-center">
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
@@ -300,10 +326,13 @@ export default function SubCharacterList() {
                                 </div>
                             </div>
                         </div>
-                        {lastFullRefresh && (
-                            <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
-                                <Clock size={12} />
-                                마지막 전체 갱신: {formatRelativeTime(lastFullRefresh)}
+                        <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
+                            <Clock size={12} />
+                            마지막 전체 갱신: {lastFullRefresh ? formatRelativeTime(lastFullRefresh) : '기록 없음'}
+                        </span>
+                        {isBatchRunning && (
+                            <span className="text-indigo-500 font-black animate-pulse text-sm">
+                                [{progress.current}/{progress.total}] {progress.status}
                             </span>
                         )}
                     </div>
@@ -311,23 +340,23 @@ export default function SubCharacterList() {
 
                 <div className="flex flex-wrap items-center gap-4">
                     <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-                        <button 
+                        <button
                             onClick={() => setViewMode('owner')}
                             className={cn(
                                 "px-6 py-2.5 rounded-xl text-sm font-black transition-all",
-                                viewMode === 'owner' 
-                                    ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]" 
+                                viewMode === 'owner'
+                                    ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]"
                                     : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                             )}
                         >
                             전체 부캐
                         </button>
-                        <button 
+                        <button
                             onClick={() => setViewMode('class')}
                             className={cn(
                                 "px-6 py-2.5 rounded-xl text-sm font-black transition-all",
-                                viewMode === 'class' 
-                                    ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]" 
+                                viewMode === 'class'
+                                    ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]"
                                     : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                             )}
                         >
@@ -369,72 +398,89 @@ export default function SubCharacterList() {
                         .sort(([ownerA], [ownerB]) => {
                             if (ownerA === pinnedOwner) return -1;
                             if (ownerB === pinnedOwner) return 1;
-                            return 0;
+
+                            // 메인 멤버(고정 멤버)의 전투력을 기준으로 내림차순 정렬
+                            const powerA = mainMembers.find(m => m.name === ownerA)?.power || 0;
+                            const powerB = mainMembers.find(m => m.name === ownerB)?.power || 0;
+
+                            return powerB - powerA;
                         })
                         .map(([owner, chars]) => {
-                        const ownerInfo = mainMembers.find(m => m.name === owner);
-                        const ownerClass = ownerInfo?.class || '';
-                        
-                        return (
-                            <div key={owner} className="glass-panel overflow-hidden">
-                                <div className="px-8 py-5 bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0", getClassColor(ownerClass))}>
-                                            {getJobShortName(ownerClass)}
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="text-xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{owner}</h3>
-                                                <span className="text-slate-400 font-bold text-sm">의 부캐 목록</span>
-                                                <button
-                                                    onClick={() => togglePin(owner)}
-                                                    className={cn("ml-2 p-1.5 rounded-lg transition-all", pinnedOwner === owner ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400" : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600")}
-                                                    title={pinnedOwner === owner ? "최상단 고정 해제" : "내 캐릭터로 설정하여 최상단에 고정"}
-                                                >
-                                                    <Pin size={16} className={pinnedOwner === owner ? "fill-amber-500 dark:fill-amber-400" : ""} />
-                                                </button>
+                            const ownerInfo = mainMembers.find(m => m.name === owner);
+                            const ownerClass = ownerInfo?.class || '';
+
+                            return (
+                                <div key={owner} className="glass-panel overflow-hidden">
+                                    <div className="px-8 py-5 bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0", getClassColor(ownerClass))}>
+                                                {getJobShortName(ownerClass)}
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="text-xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{owner}</h3>
+                                                    <span className="text-slate-400 font-bold text-sm">의 부캐 목록</span>
+                                                    <button
+                                                        onClick={() => togglePin(owner)}
+                                                        className={cn("ml-2 p-1.5 rounded-lg transition-all", pinnedOwner === owner ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400" : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600")}
+                                                        title={pinnedOwner === owner ? "최상단 고정 해제" : "내 캐릭터로 설정하여 최상단에 고정"}
+                                                    >
+                                                        <Pin size={16} className={pinnedOwner === owner ? "fill-amber-500 dark:fill-amber-400" : ""} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
+                                        <span className="text-xs font-black text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-4 py-1.5 rounded-full uppercase tracking-widest">{chars.length} SUB-CHARS</span>
                                     </div>
-                                    <span className="text-xs font-black text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-4 py-1.5 rounded-full uppercase tracking-widest">{chars.length} SUB-CHARS</span>
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm text-slate-500 dark:text-slate-300 table-fixed">
-                                        <thead className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 dark:border-slate-800">
-                                            <tr>
-                                                {isManageMode && isAdmin && <th className="w-16 px-5 py-4 text-center">선택</th>}
-                                                <th className="w-40 px-8 py-4 text-left">닉네임</th>
-                                                <th className="w-40 px-8 py-4 text-center">직업</th>
-                                                <th className="w-32 px-8 py-4 text-center">전투력</th>
-                                                <th className="w-32 px-8 py-4 text-center">아툴 점수</th>
-                                                <th className="w-32 px-8 py-4 text-center">서버</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
-                                            {chars.map(c => (
-                                                <tr key={c.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors group">
-                                                    {isManageMode && isAdmin && (
-                                                        <td className="px-5 py-4 text-center">
-                                                            <div onClick={() => setSelectedIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} className={cn("w-5 h-5 mx-auto rounded border-2 flex items-center justify-center cursor-pointer transition-all", selectedIds.includes(c.id) ? "bg-indigo-500 border-indigo-500 text-white" : "border-slate-200 dark:border-slate-700")}>
-                                                                {selectedIds.includes(c.id) && <Check size={12} strokeWidth={3} />}
-                                                            </div>
-                                                        </td>
-                                                    )}
-                                                    <td className="w-40 px-8 py-5 font-black text-slate-700 dark:text-slate-200">
-                                                        <div className="truncate" title={c.name}>{c.name}</div>
-                                                    </td>
-                                                    <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
-                                                    <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
-                                                    <td className="w-32 px-8 py-5 text-center font-bold text-amber-500">{(c.score || 0).toLocaleString()}</td>
-                                                    <td className="w-32 px-8 py-5 text-center font-bold text-slate-400">{c.server}</td>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm text-slate-500 dark:text-slate-300 table-fixed">
+                                            <thead className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 dark:border-slate-800">
+                                                <tr>
+                                                    {isManageMode && isAdmin && <th className="w-16 px-5 py-4 text-center">선택</th>}
+                                                    <th className="w-40 px-8 py-4 text-left">닉네임</th>
+                                                    <th className="w-40 px-8 py-4 text-center">직업</th>
+                                                    <th className="w-32 px-8 py-4 text-center">전투력</th>
+                                                    <th className="w-32 px-8 py-4 text-center">아툴 점수</th>
+                                                    <th className="w-32 px-8 py-4 text-center">서버</th>
+                                                    <th className="w-28 px-4 py-4 text-center text-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10">성역 매칭 희망</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
+                                                {chars.map(c => (
+                                                    <tr key={c.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors group">
+                                                        {isManageMode && isAdmin && (
+                                                            <td className="px-5 py-4 text-center">
+                                                                <div onClick={() => setSelectedIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} className={cn("w-5 h-5 mx-auto rounded border-2 flex items-center justify-center cursor-pointer transition-all", selectedIds.includes(c.id) ? "bg-indigo-500 border-indigo-500 text-white" : "border-slate-200 dark:border-slate-700")}>
+                                                                    {selectedIds.includes(c.id) && <Check size={12} strokeWidth={3} />}
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                        <td className="w-40 px-8 py-5 font-black text-slate-700 dark:text-slate-200">
+                                                            <div className="truncate" title={c.name}>{c.name}</div>
+                                                        </td>
+                                                        <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
+                                                        <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
+                                                        <td className="w-32 px-8 py-5 text-center font-bold text-amber-500">{(c.score || 0).toLocaleString()}</td>
+                                                        <td className="w-32 px-8 py-5 text-center font-bold text-slate-400">{c.server}</td>
+                                                        <td className="w-28 px-4 py-5 text-center bg-indigo-50/20 dark:bg-indigo-900/5">
+                                                            <input
+                                                                type="checkbox"
+                                                                className={cn("w-4 h-4 accent-indigo-500 transition-transform", isManageMode ? "cursor-pointer hover:scale-110" : "cursor-not-allowed opacity-60")}
+                                                                checked={c.raidOptIn !== false}
+                                                                onChange={(e) => {
+                                                                    set(ref(db, `${dbPath.subCharacters}/${c.id}/raidOptIn`), e.target.checked);
+                                                                }}
+                                                                disabled={!isManageMode}
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })
+                            );
+                        })
                 ) : (
                     /* Grouped by Class */
                     <div className="space-y-8">
@@ -453,8 +499,8 @@ export default function SubCharacterList() {
                                             <AlertCircle size={16} className="text-slate-300 cursor-help transition-colors group-hover:text-indigo-400" />
                                             <div className="absolute left-0 bottom-full mb-3 px-4 py-2 bg-slate-800/95 backdrop-blur-md text-white text-[11px] font-bold rounded-xl whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-xl z-50 transform translate-y-1 group-hover:translate-y-0">
                                                 <div className="flex flex-col gap-0.5">
-                                                    <span>전투력 2700 이상 기준</span>
-                                                    <span className="text-indigo-300 font-black">성역 컨텐츠 참여 가능 캐릭터 집계</span>
+                                                    <span><span className="text-indigo-300 font-black">성역 매칭 희망</span> 캐릭터 기준</span>
+                                                    <span>루드라 참여 가능 캐릭터 <span className="text-indigo-300 font-black">(2700+)</span> 집계</span>
                                                 </div>
                                                 <div className="absolute left-2 top-full border-[6px] border-transparent border-t-slate-800/95"></div>
                                             </div>
@@ -472,14 +518,14 @@ export default function SubCharacterList() {
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
                                 {CLASSES.map(cls => (
                                     <div key={cls} className="group/card relative bg-white/40 dark:bg-slate-800/40 border border-slate-100/50 dark:border-slate-700/50 rounded-2xl p-5 flex flex-col items-center transition-all hover:shadow-lg hover:shadow-indigo-500/5 hover:-translate-y-1 hover:bg-white dark:hover:bg-slate-800">
                                         <div className="text-[13px] font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight mb-4">
                                             {cls} <span className="text-indigo-500 ml-1">({classStats[cls].main + classStats[cls].sub})</span>
                                         </div>
-                                        
+
                                         <div className="w-full space-y-2">
                                             <div className="flex items-center justify-between bg-slate-50/50 dark:bg-slate-700/30 px-2.5 py-1.5 rounded-lg border border-slate-100/50 dark:border-slate-600/30">
                                                 <span className="text-[10px] font-black text-slate-400">MAIN</span>
@@ -551,64 +597,66 @@ export default function SubCharacterList() {
                 )}
             </div>
 
-            {isModalOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="flex justify-between items-center p-6 border-b border-slate-50 dark:border-slate-700">
-                            <h3 className="text-xl font-black text-slate-900 dark:text-white">부캐 정보 추가</h3>
-                            <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={24} /></button>
-                        </div>
-                        <div className="p-8 space-y-6">
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">본캐 이름 (소유주 캐릭터)</label>
-                                    <input type="text" placeholder="예: 부트띠" className="glass-input w-full px-4 font-bold h-12" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 서버</label>
-                                    <select value={searchServer} onChange={(e) => setSearchServer(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 h-12 text-sm font-black outline-none appearance-none cursor-pointer">
-                                        {SERVER_LIST.filter(s => s.id !== 'all').map(s => <option key={s.id} value={s.id}>{s.faction} - {s.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 닉네임</label>
-                                    <div className="relative">
-                                        <input type="text" placeholder="부캐 닉네임 입력" className="glass-input w-full pl-4 pr-12 font-bold h-12" value={searchName} onChange={(e) => setSearchName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} />
-                                        <button onClick={handleSearch} disabled={isSearching || !searchName} className="absolute right-2 top-2 h-8 w-8 flex items-center justify-center bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all disabled:opacity-50">
-                                            {isSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-                                        </button>
+            {
+                isModalOpen && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="flex justify-between items-center p-6 border-b border-slate-50 dark:border-slate-700">
+                                <h3 className="text-xl font-black text-slate-900 dark:text-white">부캐 정보 추가</h3>
+                                <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={24} /></button>
+                            </div>
+                            <div className="p-8 space-y-6">
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">본캐 이름 (소유주 캐릭터)</label>
+                                        <input type="text" placeholder="예: 부트띠" className="glass-input w-full px-4 font-bold h-12" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 서버</label>
+                                        <select value={searchServer} onChange={(e) => setSearchServer(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 h-12 text-sm font-black outline-none appearance-none cursor-pointer">
+                                            {SERVER_LIST.filter(s => s.id !== 'all').map(s => <option key={s.id} value={s.id}>{s.faction} - {s.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 닉네임</label>
+                                        <div className="relative">
+                                            <input type="text" placeholder="부캐 닉네임 입력" className="glass-input w-full pl-4 pr-12 font-bold h-12" value={searchName} onChange={(e) => setSearchName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearch()} />
+                                            <button onClick={handleSearch} disabled={isSearching || !searchName} className="absolute right-2 top-2 h-8 w-8 flex items-center justify-center bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all disabled:opacity-50">
+                                                {isSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="min-h-[120px] flex items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
-                                {isSearching ? (
-                                    <div className="text-center font-black text-indigo-500 animate-pulse">조회 중...</div>
-                                ) : searchResult ? (
-                                    searchResult === 'not-found' ? (
-                                        <div className="text-center p-4">
-                                            <p className="text-red-400 font-bold mb-3 text-xs">정보를 찾을 수 없습니다.</p>
-                                            <div className="flex gap-2">
-                                                <select id="manual-class" className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none">
-                                                    {['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'].map(c => <option key={c} value={c}>{c}</option>)}
-                                                </select>
-                                                <input id="manual-power" type="number" placeholder="전투력" className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none" />
+                                <div className="min-h-[120px] flex items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
+                                    {isSearching ? (
+                                        <div className="text-center font-black text-indigo-500 animate-pulse">조회 중...</div>
+                                    ) : searchResult ? (
+                                        searchResult === 'not-found' ? (
+                                            <div className="text-center p-4">
+                                                <p className="text-red-400 font-bold mb-3 text-xs">정보를 찾을 수 없습니다.</p>
+                                                <div className="flex gap-2">
+                                                    <select id="manual-class" className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none">
+                                                        {['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'].map(c => <option key={c} value={c}>{c}</option>)}
+                                                    </select>
+                                                    <input id="manual-power" type="number" placeholder="전투력" className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none" />
+                                                </div>
                                             </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-center p-4 space-y-1">
-                                            <div className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">{searchResult.guild}</div>
-                                            <div className="text-2xl font-black text-slate-800 dark:text-slate-200">{searchResult.name}</div>
-                                            <div className="text-xs font-bold text-slate-400">{searchResult.class} | {searchResult.power.toLocaleString()} P</div>
-                                        </div>
-                                    )
-                                ) : <div className="text-slate-300 font-bold text-xs uppercase tracking-widest">Search Character</div>}
+                                        ) : (
+                                            <div className="text-center p-4 space-y-1">
+                                                <div className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">{searchResult.guild}</div>
+                                                <div className="text-2xl font-black text-slate-800 dark:text-slate-200">{searchResult.name}</div>
+                                                <div className="text-xs font-bold text-slate-400">{searchResult.class} | {searchResult.power.toLocaleString()} P</div>
+                                            </div>
+                                        )
+                                    ) : <div className="text-slate-300 font-bold text-xs uppercase tracking-widest">Search Character</div>}
+                                </div>
+                                <button onClick={confirmAdd} disabled={!searchResult} className="glass-btn w-full h-14 text-lg font-black">부캐 추가하기</button>
                             </div>
-                            <button onClick={confirmAdd} disabled={!searchResult} className="glass-btn w-full h-14 text-lg font-black">부캐 추가하기</button>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

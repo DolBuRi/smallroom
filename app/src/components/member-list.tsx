@@ -458,16 +458,13 @@ export default function MemberList() {
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
                                     정각마다 자동 갱신됩니다.
-                                    <div className="absolute left-1/2 -translate-x-1/2 top-full border-4 border-transparent border-t-slate-800"></div>
                                 </div>
                             </div>
                         </div>
-                        {lastFullRefresh && (
-                            <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
-                                <Clock size={12} />
-                                마지막 전체 갱신: {formatRelativeTime(lastFullRefresh)}
-                            </span>
-                        )}
+                        <span className="text-[11px] bg-slate-100/80 dark:bg-slate-800/80 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
+                            <Clock size={12} />
+                            마지막 전체 갱신: {lastFullRefresh ? formatRelativeTime(lastFullRefresh) : '기록 없음'}
+                        </span>
                         {isBatchRunning && (
                             <span className="text-indigo-500 font-black animate-pulse text-sm">
                                 [{progress.current}/{progress.total}] {progress.status}
