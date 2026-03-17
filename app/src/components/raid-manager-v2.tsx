@@ -185,7 +185,7 @@ const MemberCard = ({ member, compact = false, onShowTooltip, onHideTooltip, fix
     );
 };
 
-function MemberDetailTooltip({ member, rect, fixedGroups = [], roster = [], isAdmin = false }: { member: RaidApplication, rect: DOMRect, fixedGroups?: FixedGroup[], roster?: any[], isAdmin?: boolean }) {
+function MemberDetailTooltip({ member, rect, fixedGroups = [], roster = [], subCharacters = [], isAdmin = false, mode = 'legion' }: { member: RaidApplication, rect: DOMRect, fixedGroups?: FixedGroup[], roster?: any[], subCharacters?: any[], isAdmin?: boolean, mode?: 'legion' | 'fixed' }) {
     const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
 
     // Find matching roster member
@@ -289,7 +289,62 @@ function MemberDetailTooltip({ member, rect, fixedGroups = [], roster = [], isAd
                         </div>
                     </section>
 
-                    {fixedGroup && (
+                    {mode === 'fixed' && (
+                        <section className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                            {(() => {
+                                // 1. Identify owner
+                                const fuzzy = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
+                                const mNickFuzzy = fuzzy(member.nickname);
+                                
+                                // Check if this member is a main or sub
+                                const mInRoster = roster.find(m => fuzzy(m.name) === mNickFuzzy);
+                                const mInSubs = subCharacters.find(s => fuzzy(s.name) === mNickFuzzy);
+                                
+                                const ownerName = mInSubs?.ownerName || mInRoster?.name || member.nickname;
+                                const ownerFuzzy = fuzzy(ownerName);
+
+                                // 2. Find all characters of this owner
+                                const ownerMain = roster.find(m => fuzzy(m.name) === ownerFuzzy);
+                                const ownerSubs = subCharacters.filter(s => fuzzy(s.ownerName) === ownerFuzzy);
+                                
+                                // 3. Build List
+                                const allChars = [];
+                                if (ownerMain) allChars.push({ ...ownerMain, isMain: true });
+                                ownerSubs.forEach(s => {
+                                    if (fuzzy(s.name) !== fuzzy(ownerMain?.name)) {
+                                        allChars.push({ ...s, isMain: false });
+                                    }
+                                });
+
+                                return (
+                                    <>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">소유자 ({ownerName})</h4>
+                                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                        </div>
+                                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 space-y-2">
+                                            {allChars.length > 0 ? allChars.sort((a,b) => (b.power || 0) - (a.power || 0)).map((gm, idx) => (
+                                                <div key={`${gm.id}-${idx}`} className="flex justify-between items-center text-xs">
+                                                    <div className="flex items-center gap-2 overflow-hidden">
+                                                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", getClassColor(gm.class).split(' ')[0])} />
+                                                        <span className={cn("font-bold truncate", gm.name === member.nickname ? "text-indigo-600 dark:text-indigo-400" : "text-slate-700 dark:text-slate-300")}>
+                                                            {gm.name}
+                                                        </span>
+                                                        {gm.isMain && <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/40 text-indigo-500 px-1 rounded flex-shrink-0 font-bold">본캐</span>}
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-2">{gm.class || '미정'}</span>
+                                                </div>
+                                            )) : (
+                                                <p className="text-[10px] text-slate-400 text-center py-2">연결된 캐릭터 정보 없음</p>
+                                            )}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </section>
+                    )}
+
+                    {mode !== 'fixed' && fixedGroup && (
                         <section className="pt-4 border-t border-slate-100 dark:border-slate-800">
                             <div className="flex items-center justify-between mb-2">
                                 <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">고정 파티 ({fixedGroup.name})</h4>
@@ -492,6 +547,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     const [applications, setApplications] = useState<RaidApplication[]>([]);
     const [fixedGroups, setFixedGroups] = useState<FixedGroup[]>([]);
     const [roster, setRoster] = useState<any[]>([]);
+    const [subCharacters, setSubCharacters] = useState<any[]>([]);
 
     // Detailed View State
     const [selectedDay, setSelectedDay] = useState<string>('전체');
@@ -579,12 +635,19 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
             setApplications(data ? Object.values(data) as RaidApplication[] : []);
         });
 
+        // 4. Load Sub Characters
+        const unsubscribeSubChars = onValue(ref(db, dbPath.subCharacters), (snapshot) => {
+            const data = snapshot.val();
+            setSubCharacters(data ? Object.values(data) : []);
+        });
+
         return () => {
             unsubscribeGroups();
             unsubscribeMembers();
             unsubscribeApps();
+            unsubscribeSubChars();
         };
-    }, [testMode]);
+    }, [testMode, dbPath]);
 
     // Dummy Data Generator (Preserved for Admin)
     const generateDummyData = async () => {
@@ -952,7 +1015,9 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     rect={tooltipInfo.rect}
                     fixedGroups={fixedGroups}
                     roster={roster}
+                    subCharacters={subCharacters}
                     isAdmin={isAdmin}
+                    mode={mode}
                 />
             )}
 

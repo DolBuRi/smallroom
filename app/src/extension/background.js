@@ -29,10 +29,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             rId = '1';
         }
 
-        const params = `?q=${encodeURIComponent(name)}&serverId=${sId}&raceId=${rId}&auto_scrape=true`;
+        const url = `https://aion2tool.com/char/serverid=${sId}/${encodeURIComponent(name)}?auto_scrape=true`;
 
         chrome.windows.create({
-            url: `https://aion2tool.com/${params}`,
+            url,
             type: 'popup',
             state: 'minimized',
             focused: false

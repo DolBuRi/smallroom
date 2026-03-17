@@ -33,7 +33,7 @@ export function ModeProvider({ children, forcedMode }: { children: ReactNode, fo
     // Determine mode based on URL if not forced
     const mode: AppMode = useMemo(() => {
         if (forcedMode) return forcedMode;
-        if (pathname === '/fixed-party' || pathname.startsWith('/fixed-party/')) return 'fixed';
+        if (pathname === '/fixed-party' || pathname.startsWith('/fixed-party/') || pathname === '/fixed-apply' || pathname.startsWith('/fixed-apply/')) return 'fixed';
         return 'legion';
     }, [pathname, forcedMode]);
 

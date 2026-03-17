@@ -56,7 +56,7 @@ export default function TestScrapingPage() {
                         type="text"
                         value={nickname}
                         onChange={(e) => setNickname(e.target.value)}
-                        placeholder="캐릭터명 입력 (예: 부트띠)"
+                        placeholder="캐릭터명 입력 (예: 사신대행이치고)"
                         className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         onKeyDown={(e) => e.key === 'Enter' && handleTest()}
                     />

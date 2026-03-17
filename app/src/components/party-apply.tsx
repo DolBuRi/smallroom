@@ -75,7 +75,7 @@ export default function PartyApply({
     forceSingleColumn?: boolean
 }) {
     const { isAdmin } = useAuth();
-    const { dbPath } = useAppMode();
+    const { dbPath, mode } = useAppMode();
     const [nickname, setNickname] = useState('');
     const [availability, setAvailability] = useState<Record<string, string[]>>({
         '월': [], '화': [], '수': [], '목': [], '금': [], '토': [], '일': []
@@ -122,7 +122,7 @@ export default function PartyApply({
             unsubMembers();
             unsubApps();
         }
-    }, [testMode]);
+    }, [testMode, dbPath]);
 
     // When nickname changes, pre-fill availability if exists
     React.useEffect(() => {
@@ -379,7 +379,7 @@ export default function PartyApply({
                             )}
                             {nickname && members.some(m => m.name === nickname) && (
                                 <div className="text-indigo-500 flex items-center gap-2 animate-in slide-in-from-left-2">
-                                    <Check size={14} strokeWidth={4} /> 레기온 정식 멤버 확인됨
+                                    <Check size={14} strokeWidth={4} /> {mode === 'fixed' ? '고정 멤버' : '레기온 멤버'} 확인됨
                                 </div>
                             )}
                             {nickname && existingApps.find(a => a.nickname === nickname.trim()) && (

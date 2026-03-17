@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Sword, Pin } from 'lucide-react';
+import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, List, Pin } from 'lucide-react';
 import { cn, formatRelativeTime, getClassColor, getJobShortName } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { ref, onValue, set, remove } from 'firebase/database';
@@ -310,7 +310,7 @@ export default function SubCharacterList() {
             <div className="flex justify-between items-center gap-6">
                 <div>
                     <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
-                        <Sword className="text-indigo-500" size={36} />
+                        <List className="text-indigo-500" size={36} />
                         고정 멤버 부캐
                         {isBatchRunning && <Loader2 size={24} className="text-indigo-500 animate-spin ml-2" />}
                     </h2>
@@ -418,7 +418,15 @@ export default function SubCharacterList() {
                                             </div>
                                             <div className="flex flex-col">
                                                 <div className="flex items-center gap-2">
-                                                    <h3 className="text-xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{owner}</h3>
+                                                    <a 
+                                                        href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === (mainMembers.find(m => m.name === owner)?.server || '아리엘'))?.id || '1006'}/${encodeURIComponent(owner)}`} 
+                                                        target="_blank" 
+                                                        rel="noopener noreferrer"
+                                                        className="text-xl font-black text-slate-800 dark:text-slate-200 tracking-tight hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4"
+                                                        title={`${owner} 아툴 정보 보기`}
+                                                    >
+                                                        {owner}
+                                                    </a>
                                                     <span className="text-slate-400 font-bold text-sm">의 부캐 목록</span>
                                                     <button
                                                         onClick={() => togglePin(owner)}
@@ -456,7 +464,15 @@ export default function SubCharacterList() {
                                                             </td>
                                                         )}
                                                         <td className="w-40 px-8 py-5 font-black text-slate-700 dark:text-slate-200">
-                                                            <div className="truncate" title={c.name}>{c.name}</div>
+                                                            <a 
+                                                                href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === c.server)?.id || '1006'}/${encodeURIComponent(c.name)}`} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="truncate hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4 block" 
+                                                                title={`${c.name} 아툴 정보 보기`}
+                                                            >
+                                                                {c.name}
+                                                            </a>
                                                         </td>
                                                         <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
                                                         <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
@@ -579,12 +595,30 @@ export default function SubCharacterList() {
                                                         </td>
                                                     )}
                                                     <td className="w-40 px-8 py-5 font-black text-slate-700 dark:text-slate-200">
-                                                        <div className="truncate" title={c.name}>{c.name}</div>
+                                                        <a 
+                                                            href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === c.server)?.id || '1006'}/${encodeURIComponent(c.name)}`} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="truncate hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4 block" 
+                                                            title={`${c.name} 아툴 정보 보기`}
+                                                        >
+                                                            {c.name}
+                                                        </a>
                                                     </td>
                                                     <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
                                                     <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
                                                     <td className="w-32 px-8 py-5 text-center font-bold text-amber-500">{(c.score || 0).toLocaleString()}</td>
-                                                    <td className="w-40 px-8 py-5 text-center font-bold text-slate-500">{c.ownerName}</td>
+                                                    <td className="w-40 px-8 py-5 text-center font-bold text-slate-500">
+                                                        <a 
+                                                            href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === (mainMembers.find(m => m.name === c.ownerName)?.server || '아리엘'))?.id || '1006'}/${encodeURIComponent(c.ownerName)}`} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="hover:text-indigo-500 hover:underline transition-all decoration-1 underline-offset-4"
+                                                            title={`${c.ownerName} 아툴 정보 보기`}
+                                                        >
+                                                            {c.ownerName}
+                                                        </a>
+                                                    </td>
                                                     <td className="w-32 px-8 py-5 text-center font-bold text-slate-400">{c.server}</td>
                                                 </tr>
                                             ))}
@@ -609,7 +643,7 @@ export default function SubCharacterList() {
                                 <div className="space-y-4">
                                     <div className="space-y-2">
                                         <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">본캐 이름 (소유주 캐릭터)</label>
-                                        <input type="text" placeholder="예: 부트띠" className="glass-input w-full px-4 font-bold h-12" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+                                        <input type="text" placeholder="예: 사신대행이치고" className="glass-input w-full px-4 font-bold h-12" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
                                     </div>
                                     <div className="space-y-2">
                                         <label className="block text-xs font-bold text-slate-400 pl-1 uppercase tracking-widest">부캐 서버</label>

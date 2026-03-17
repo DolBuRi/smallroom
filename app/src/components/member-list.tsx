@@ -383,7 +383,17 @@ export default function MemberList() {
                         </div>
                     </td>
                 )}
-                <td className="px-5 py-5 font-black text-slate-700 dark:text-slate-200">{m.name}</td>
+                <td className="px-5 py-5 font-black text-slate-700 dark:text-slate-200">
+                    <a 
+                        href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === m.server)?.id || '1006'}/${encodeURIComponent(m.name)}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4"
+                        title={`${m.name} 아툴 정보 보기`}
+                    >
+                        {m.name}
+                    </a>
+                </td>
                 {mode !== 'fixed' && (
                     <td className="px-5 py-5 text-center">
                         <div className="relative w-[100px] mx-auto flex items-center justify-center">

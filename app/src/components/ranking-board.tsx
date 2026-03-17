@@ -376,7 +376,15 @@ export default function RankingBoard() {
 
                                 <div className="flex-1">
                                     <div className="flex items-center gap-3">
-                                        <span className="text-2xl font-black text-slate-800 dark:text-slate-200 tracking-tight">{m.name}</span>
+                                        <a 
+                                            href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === m.server)?.id || '1006'}/${encodeURIComponent(m.name)}`} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-2xl font-black text-slate-800 dark:text-slate-200 tracking-tight hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4"
+                                            title={`${m.name} 아툴 정보 보기`}
+                                        >
+                                            {m.name}
+                                        </a>
                                         <span className="px-3 py-1 bg-slate-50 dark:bg-slate-700/50 text-slate-400 dark:text-indigo-200 text-[10px] font-black rounded-lg border border-slate-100 dark:border-slate-700 tracking-widest uppercase">{m.class}</span>
                                         {m.rank === '군단장' && <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-500 px-2 py-0.5 rounded-md font-black border border-amber-100 dark:border-amber-900/30 tracking-tight">군단장</span>}
                                         {(m.rank === '장교' || m.rank === '엘리트 장교') && <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black border border-indigo-100 dark:border-indigo-900/30 tracking-tight">장교</span>}
