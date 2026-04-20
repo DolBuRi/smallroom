@@ -145,14 +145,12 @@ async function scrapeCharacter(nickname, serverId = 1006) {
             const data = await page.evaluate(() => {
                 const bodyText = document.body.innerText;
                 const powerEl = document.getElementById('result-combat-power');
-                const scoreEl = document.getElementById('dps-score-value');
                 const jobEl = document.getElementById('result-job');
 
                 return {
                     raw: bodyText,
                     lines: bodyText.split('\n').map(l => l.trim()).filter(l => l.length > 0),
                     idPower: powerEl ? powerEl.innerText : null,
-                    idScore: scoreEl ? scoreEl.innerText : null,
                     idJob: jobEl ? jobEl.innerText : null
                 };
             });
@@ -174,10 +172,34 @@ async function scrapeCharacter(nickname, serverId = 1006) {
                 job = jobs.find(j => data.raw.includes(j)) || "미정";
             }
 
-            let power = parseInt((data.idPower || '').replace(/[^0-9]/g, '')) || 0;
-            if (power === 0) {
-                const powerMatch = data.raw.match(/전투력\s*([\d,]+)/);
-                if (powerMatch) power = parseInt(powerMatch[1].replace(/,/g, ''));
+            const powerRaw = (data.idPower || '').trim();
+            console.log(`[분석] Power Raw: ${powerRaw}`);
+
+            let itemLevel = 0;
+            let power = 0;
+
+            // 1순위: 텍스트 기반 레이블 검색 (가장 확실함)
+            const ilMatch = data.raw.match(/아이템\s*레벨\s*[:]?\s*([\d,]+)/);
+            if (ilMatch) itemLevel = parseInt(ilMatch[1].replace(/,/g, ''));
+
+            const pMatch = data.raw.match(/전투력\s*[:]?\s*([\d,]+)(?!\s*\/)/); // 달성 최고 전투력 제외를 위해 / 앞에 오는 것만 매치 시도
+            if (pMatch) power = parseInt(pMatch[1].replace(/,/g, ''));
+
+            // 2순위: 레이블 검색 실패 시, ID 엘리먼트 값 활용
+            if (itemLevel === 0 || power === 0) {
+                const rawNum = parseInt(powerRaw.replace(/[^0-9]/g, '')) || 0;
+                if (rawNum > 0) {
+                    // 수치 크기로 대략적인 유추 (아이템 레벨은 보통 1만 미만)
+                    if (rawNum < 10000 && itemLevel === 0) itemLevel = rawNum;
+                    else if (rawNum >= 10000 && power === 0) power = rawNum;
+                }
+            }
+
+            // 3순위: 그래도 전투력이 0이고 뭉쳐있는 데이터가 있다면 (이전 버전 대응)
+            if (power === 0 && itemLevel > 10000000) {
+                const s = String(itemLevel);
+                itemLevel = parseInt(s.substring(0, 4));
+                power = parseInt(s.substring(4));
             }
 
             let guild = "-";
@@ -195,26 +217,19 @@ async function scrapeCharacter(nickname, serverId = 1006) {
             }
             if (guild === "랭킹") guild = "-";
 
-            let score = parseInt((data.idScore || '').replace(/[^0-9]/g, '')) || 0;
-            if (score === 0) {
-                const scoreMatch = data.raw.match(/(Score|점수|RP|어비스 포인트)\s*[:]?\s*([\d,]+)/i);
-                if (scoreMatch) score = parseInt(scoreMatch[2].replace(/,/g, ''));
-            }
 
-            // 재시도 조건
-            if (power > 0 && score === 0) {
-                console.log(`⚠️ 불완전 데이터 (Power: ${power}, Score: ${score}). 재시도...`);
+            // 재시도 조건 (필수 데이터 부재 시)
+            if (power === 0) {
+                console.log(`⚠️ 데이터 추출 실패 (Power: ${power}). 재시도...`);
                 if (page) await page.close();
                 continue;
             }
 
-            if (power === 0) throw new Error("INVALID_DATA (Power is 0)");
-
-            console.log(`[성공] ${nickname} -> ${power} / ${score}`);
+            console.log(`[성공] ${nickname} -> Power: ${power}, ItemLevel: ${itemLevel}`);
             if (page) await page.close();
             return {
                 success: true,
-                data: { name: nickname, class: job, power, guild, score }
+                data: { name: nickname, class: job, power, itemLevel, guild }
             };
 
         } catch (e) {
@@ -289,7 +304,7 @@ async function runBatchScrape(taskName, paths, timestampPath) {
                         const updatePromises = item.targets.map(t => 
                             db.ref(`${t.path}/${t.index}`).update({
                                 power: res.data.power,
-                                score: res.data.score,
+                                itemLevel: res.data.itemLevel || 0,
                                 class: res.data.class,
                                 guild: res.data.guild,
                                 isActive: (res.data.guild === '츄'),
