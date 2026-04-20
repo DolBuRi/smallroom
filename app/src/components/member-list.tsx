@@ -4,9 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, Users, UserCheck, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, Sheet } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { ref, onValue, set, remove } from 'firebase/database';
+import { ref, onValue, set, remove, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
+import { SERVER_LIST, scrapeMember, parsePowerAndItemLevel } from '@/lib/scraper';
 
 // Data Type
 export interface GuildMember {
@@ -15,70 +16,29 @@ export interface GuildMember {
     rank: '군단장' | '엘리트 장교' | '장교' | '군단병';
     class: string;
     power: number;
+    itemLevel?: number;
     guild: string;
     isActive: boolean;
     clearCount: string;
-    score?: number;
     lastUpdated?: string;
     specialNotes?: string;
     joinDate?: string;
     faction?: '천족' | '마족';
     server?: string;
+    // Aether Energy
+    aetherEnergy?: number;
+    aetherEnergyLastUpdated?: string;
+    aetherCharged?: number;
 }
 
-export const SERVER_LIST = [
-    { id: 'all', name: '전체 서버', faction: '전체' },
+
+export default function MemberList({ mode: propMode, isAdmin: propAdmin }: { mode?: 'legion' | 'fixed', isAdmin?: boolean }) {
+    const { isAdmin: authAdmin, user, loading } = useAuth();
+    const { dbPath, mode: contextMode } = useAppMode();
     
-    // 천족 (Elyos)
-    { id: '1001', name: '시엘', faction: '천족' },
-    { id: '1002', name: '네자칸', faction: '천족' },
-    { id: '1003', name: '바이젤', faction: '천족' },
-    { id: '1004', name: '카이시넬', faction: '천족' },
-    { id: '1005', name: '유스티엘', faction: '천족' },
-    { id: '1006', name: '아리엘', faction: '천족' },
-    { id: '1007', name: '프레기온', faction: '천족' },
-    { id: '1008', name: '메스람타에다', faction: '천족' },
-    { id: '1009', name: '히타니에', faction: '천족' },
-    { id: '1010', name: '나니아', faction: '천족' },
-    { id: '1011', name: '타하바타', faction: '천족' },
-    { id: '1012', name: '루터스', faction: '천족' },
-    { id: '1013', name: '페르노스', faction: '천족' },
-    { id: '1014', name: '다미누', faction: '천족' },
-    { id: '1015', name: '카사카', faction: '천족' },
-    { id: '1016', name: '바카르마', faction: '천족' },
-    { id: '1017', name: '챈가룽', faction: '천족' },
-    { id: '1018', name: '코치룽', faction: '천족' },
-    { id: '1019', name: '이슈타르', faction: '천족' },
-    { id: '1020', name: '티아마트', faction: '천족' },
-    { id: '1021', name: '포에타', faction: '천족' },
-
-    // 마족 (Asmodian)
-    { id: '2001', name: '이스라펠', faction: '마족' },
-    { id: '2002', name: '지켈', faction: '마족' },
-    { id: '2003', name: '트리니엘', faction: '마족' },
-    { id: '2004', name: '루미엘', faction: '마족' },
-    { id: '2005', name: '마르쿠탄', faction: '마족' },
-    { id: '2006', name: '아스펠', faction: '마족' },
-    { id: '2007', name: '에레슈키갈', faction: '마족' },
-    { id: '2008', name: '브리트라', faction: '마족' },
-    { id: '2009', name: '네먼', faction: '마족' },
-    { id: '2010', name: '하달', faction: '마족' },
-    { id: '2011', name: '루드라', faction: '마족' },
-    { id: '2012', name: '울고른', faction: '마족' },
-    { id: '2013', name: '무닌', faction: '마족' },
-    { id: '2014', name: '오다르', faction: '마족' },
-    { id: '2015', name: '젠카카', faction: '마족' },
-    { id: '2016', name: '크로메데', faction: '마족' },
-    { id: '2017', name: '콰이링', faction: '마족' },
-    { id: '2018', name: '바바룽', faction: '마족' },
-    { id: '2019', name: '파프니르', faction: '마족' },
-    { id: '2020', name: '인드라투', faction: '마족' },
-    { id: '2021', name: '이스할겐', faction: '마족' },
-];
-
-export default function MemberList() {
-    const { isAdmin, user, loading } = useAuth();
-    const { dbPath, mode } = useAppMode();
+    // Props take precedence over context
+    const isAdmin = propAdmin !== undefined ? propAdmin : authAdmin;
+    const mode = propMode || contextMode || 'legion';
     const [members, setMembers] = useState<GuildMember[]>([]);
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -114,13 +74,18 @@ export default function MemberList() {
         const unsubscribe = onValue(membersRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                const normalized = (Object.values(data) as any[])
-                    .filter(m => m && (m.name || m.id))
-                    .map((m: any) => ({
-                        ...m,
-                        clearCount: m.clearCount || '0회',
-                        score: m.score || 0
-                    }));
+                const normalized = Object.entries(data)
+                    .filter(([key, m]) => m && (m as any).name)
+                    .map(([key, m]: [string, any]) => {
+                        const { power, itemLevel } = parsePowerAndItemLevel(m.power, m.itemLevel);
+                        return {
+                            ...m,
+                            id: m.id || key,
+                            power,
+                            itemLevel,
+                            clearCount: m.clearCount || '0회',
+                        };
+                    });
                 setMembers(normalized);
             } else {
                 setMembers([]);
@@ -144,9 +109,19 @@ export default function MemberList() {
 
     const saveMembers = async (newMembers: GuildMember[]) => {
         setIsSaving(true);
+        // Clean undefineds before saving
+        const cleanedList = (newMembers || []).map(m => {
+            const clean: any = {};
+            Object.entries(m).forEach(([k, v]) => {
+                if (v !== undefined) clean[k] = v;
+            });
+            return clean;
+        });
+
         try {
-            await set(ref(db, dbPath.members), newMembers);
+            await set(ref(db, dbPath.members), cleanedList);
         } catch (e) {
+            console.error("Save failed:", e);
             alert("저장 실패!");
         } finally {
             setIsSaving(false);
@@ -158,87 +133,55 @@ export default function MemberList() {
         saveMembers(newList);
     };
 
-    const scrapeMember = async (name: string, serverId: string = '1006') => {
-        try {
-            const res = await fetch('/api/proxy/scrape', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, serverId })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.success) return data;
-            }
-        } catch (e) { }
 
-        const serverName = SERVER_LIST.find(s => s.id === serverId)?.name || '아리엘';
-        const faction = SERVER_LIST.find(s => s.id === serverId)?.faction;
-
-        return new Promise<any>((resolve) => {
-            const handleResponse = (event: MessageEvent) => {
-                if (event.source !== window || event.data.type !== 'AONI_SEARCH_RESPONSE') return;
-                window.removeEventListener('message', handleResponse);
-                resolve(event.data);
-            };
-            window.addEventListener('message', handleResponse);
-            setTimeout(() => {
-                window.removeEventListener('message', handleResponse);
-                resolve({ success: false, error: 'Timeout' });
-            }, 20000);
-            window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server: serverName, serverId, faction }, "*");
-        });
-    };
-
-    const handleRefreshAll = async () => {
-        if (isBatchRunning) return;
-        if (!isAdmin) {
-            const lastUpdateDate = lastFullRefresh ? new Date(lastFullRefresh) : new Date(0);
-            const diffMinutes = (Date.now() - lastUpdateDate.getTime()) / 60000;
-            if (diffMinutes < 5) {
-                alert(`마지막 갱신으로부터 5분간 갱신이 제한됩니다.\n(${Math.ceil(5 - diffMinutes)}분 후에 다시 시도해주세요)`);
-                return;
-            }
+    const handleRefreshAll = async (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
         }
-        if (!confirm(`총 ${members.length}명의 소속 길드원 정보를 갱신합니다.\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
+
+        if (isBatchRunning) return;
+        
+        const confirmed = window.confirm(`총 ${(members || []).length}명의 정보를 갱신합니다.\n데이터 수집을 위해 시간이 다소 소요됩니다. 진행하시겠습니까?`);
+        if (!confirmed) return;
 
         setIsBatchRunning(true);
         const validMembers = members.filter(m => m && m.name);
-        let updatedList = [...members];
         let successCount = 0;
 
         for (let i = 0; i < validMembers.length; i++) {
             const member = validMembers[i];
-            setProgress({ current: i + 1, total: validMembers.length, status: '갱신 중...' });
+            setProgress({ current: i + 1, total: validMembers.length, status: `${member.name} 갱신 중...` });
 
             try {
                 const targetServerId = member.server ? (SERVER_LIST.find(s => s.name === member.server)?.id || '1006') : '1006';
                 const res = await scrapeMember(member.name, targetServerId);
                 if (res.success && res.data) {
-                    updatedList = updatedList.map(m => m.id === member.id ? {
-                        ...m,
-                        power: parseInt(res.data.power),
-                        score: parseInt(res.data.score) || 0,
+                    const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
+                    // Individual update for robustness
+                    await update(ref(db, `${dbPath.members}/${member.id}`), {
+                        power,
+                        itemLevel,
                         class: res.data.class,
                         guild: res.data.guild,
-                        isActive: (res.data.guild === appSettings.guildName),
+                        isActive: String(res.data.guild || '').includes(appSettings.guildName),
                         lastUpdated: new Date().toISOString()
-                    } : m);
+                    });
                     successCount++;
                 }
-            } catch (e) { }
-            if (i < validMembers.length - 1) await new Promise(r => setTimeout(r, 4000));
+            } catch (e) {
+                console.error(`Refresh error for ${member.name}:`, e);
+            }
+            if (i < validMembers.length - 1) await new Promise(r => setTimeout(r, 1000));
         }
 
         try {
-            await set(ref(db, dbPath.members), updatedList);
             await set(ref(db, dbPath.lastFullRefresh), new Date().toISOString());
-            setMembers(updatedList); // Update local state after successful save
-        } catch (e) {
-            alert("갱신된 정보 저장 실패!");
-        } finally {
-            setIsBatchRunning(false);
-            alert(`갱신 완료! (성공: ${successCount}/${validMembers.length})`);
-        }
+        } catch (e) { }
+
+        setIsBatchRunning(false);
+        alert(`갱신 완료! (성공: ${successCount}/${validMembers.length})`);
     };
 
     const handleSearch = async () => {
@@ -249,19 +192,23 @@ export default function MemberList() {
             const serverObj = SERVER_LIST.find(s => s.id === searchServer);
             const res = await scrapeMember(searchName, searchServer);
             if (res.success && res.data) {
+                const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
                 setSearchResult({
                     id: String(Date.now()),
                     name: res.data.name,
                     rank: '군단병',
                     class: res.data.class,
-                    power: parseInt(res.data.power),
-                    score: parseInt(res.data.score) || 0,
+                    power,
+                    itemLevel,
                     guild: res.data.guild,
                     isActive: res.data.guild === appSettings.guildName,
                     clearCount: '0회',
                     lastUpdated: new Date().toISOString(),
-                    faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
-                    server: mode === 'fixed' ? serverObj?.name : undefined
+                    ...(mode === 'fixed' ? {
+                        faction: serverObj?.faction as any,
+                        server: serverObj?.name
+                    } : {})
                 });
             } else { setSearchResult('not-found'); }
         } catch (e) { alert("검색 중 오류 발생"); }
@@ -276,14 +223,16 @@ export default function MemberList() {
             const targetServerId = member?.server ? (SERVER_LIST.find(s => s.name === member.server)?.id || '1006') : '1006';
             const res = await scrapeMember(nameToUpdate, targetServerId);
             if (res.success && res.data) {
+                const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
                 let found = false;
                 const newList = members.map(m => {
                     if (m.name === nameToUpdate) {
                         found = true;
                         return {
                             ...m,
-                            power: parseInt(res.data.power),
-                            score: parseInt(res.data.score) || 0,
+                            power,
+                            itemLevel,
                             class: res.data.class,
                             guild: res.data.guild,
                             isActive: (res.data.guild === appSettings.guildName),
@@ -310,8 +259,10 @@ export default function MemberList() {
             const serverObj = SERVER_LIST.find(s => s.id === searchServer);
             updateMembers([...members, {
                 ...searchResult,
-                faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
-                server: mode === 'fixed' ? serverObj?.name : undefined
+                ...(mode === 'fixed' ? {
+                    faction: serverObj?.faction as any,
+                    server: serverObj?.name
+                } : {})
             }]);
             closeModal();
         } else if (searchResult === 'not-found') {
@@ -324,13 +275,15 @@ export default function MemberList() {
                 rank: '군단병',
                 class: cls,
                 power: pwr,
-                score: 0,
+                itemLevel: 0,
                 guild: '-',
                 isActive: false,
                 clearCount: '0회',
                 lastUpdated: new Date().toISOString(),
-                faction: mode === 'fixed' ? (serverObj?.faction as any) : undefined,
-                server: mode === 'fixed' ? serverObj?.name : undefined
+                ...(mode === 'fixed' ? {
+                    faction: serverObj?.faction as any,
+                    server: serverObj?.name
+                } : {})
             }]);
             closeModal();
         }
@@ -383,7 +336,7 @@ export default function MemberList() {
                         </div>
                     </td>
                 )}
-                <td className="px-5 py-5 font-black text-slate-700 dark:text-slate-200">
+                <td className="px-5 py-5 font-black text-slate-700 dark:text-slate-200 min-w-[170px]">
                     <a 
                         href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === m.server)?.id || '1006'}/${encodeURIComponent(m.name)}`} 
                         target="_blank" 
@@ -417,8 +370,8 @@ export default function MemberList() {
                     </td>
                 )}
                 <td className="px-5 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{m.class}</td>
+                <td className="px-5 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{m.itemLevel?.toLocaleString() || '-'}</td>
                 <td className="px-5 py-5 text-center font-black text-indigo-600 dark:text-indigo-300">{m.power.toLocaleString()}</td>
-                <td className="px-5 py-5 text-center font-bold text-amber-500">{(m.score || 0).toLocaleString()}</td>
                 {mode === 'fixed' && (
                     <td className="px-5 py-5 text-center font-bold text-slate-600 dark:text-slate-300">
                         {m.server || '아리엘'}
@@ -505,7 +458,7 @@ export default function MemberList() {
                     <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
                     <ManualRefreshInput isManageMode={isManageMode} isManualUpdating={isManualUpdating} onUpdate={handleManualUpdate} />
                     <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
-                    <button onClick={handleRefreshAll} disabled={isBatchRunning} className="glass-btn flex items-center gap-3 h-12 px-6">
+                    <button onClick={(e) => handleRefreshAll(e)} disabled={isBatchRunning} className="glass-btn flex items-center gap-3 h-12 px-6">
                         {isBatchRunning ? `갱신 중...` : "전체 정보 갱신"}
                         <RefreshCw className={cn("w-5 h-5", isBatchRunning && "animate-spin")} />
                     </button>
@@ -529,16 +482,16 @@ export default function MemberList() {
                             <thead className="bg-slate-50/50 dark:bg-slate-800/50 text-slate-400 uppercase font-black tracking-widest text-[13px] border-b border-slate-100 dark:border-slate-700">
                                 <tr>
                                     {isManageMode && <th className="w-16 px-2 py-5 text-center">선택</th>}
-                                    <th className="px-5 py-5 text-center">닉네임</th>
+                                    <th className="px-5 py-5 text-center min-w-[170px]">닉네임</th>
                                     {mode !== 'fixed' && <th className="px-5 py-5 text-center">계급</th>}
                                     <th className="px-5 py-5 text-center">직업</th>
+                                    <th className="px-5 py-5 text-center">장비 레벨</th>
                                     <th className="px-5 py-5 text-center">전투력</th>
-                                    <th className="px-5 py-5 text-center">아툴 점수</th>
                                     {mode === 'fixed' && <th className="px-5 py-5 text-center">서버</th>}
                                     {mode !== 'fixed' && (
                                         <>
                                             <th className="px-5 py-5 text-center">성역</th>
-                                            {isAdmin && <th className="w-[185px] px-2 py-5 text-center">특이사항</th>}
+                                            {isAdmin && <th className="w-[120px] px-2 py-5 text-center">특이사항</th>}
                                             {isAdmin && <th className="px-5 py-5 text-center text-xs">가입일</th>}
                                             <th className="px-5 py-5 text-center">소속 여부</th>
                                         </>
@@ -666,7 +619,7 @@ function SpecialNoteCell({ member, onSave }: { member: GuildMember, onSave: (not
     const [localNotes, setLocalNotes] = useState(member.specialNotes || '');
     useEffect(() => { setLocalNotes(member.specialNotes || ''); }, [member.specialNotes]);
     return (
-        <td className="w-[185px] px-2 py-3">
+        <td className="w-[120px] px-2 py-3">
             <textarea
                 value={localNotes}
                 onChange={(e) => setLocalNotes(e.target.value)}

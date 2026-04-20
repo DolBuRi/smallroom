@@ -62,11 +62,22 @@ export default function StaticPartyList() {
             if (data) {
                 const normalized = (Object.values(data) as any[])
                     .filter(m => m && (m.name || m.id))
-                    .map((m: any) => ({
-                        ...m,
-                        clearCount: m.clearCount || '0회',
-                        score: m.score || 0
-                    }));
+                    .map((m: any) => {
+                        let p = parseInt(String(m.power || 0).replace(/,/g, ''));
+                        let il = parseInt(String(m.itemLevel || 0).replace(/,/g, '')) || 0;
+
+                        if (!il && p > 10000000) {
+                            const s = String(p);
+                            il = parseInt(s.substring(0, 4));
+                            p = parseInt(s.substring(4));
+                        }
+                        return {
+                            ...m,
+                            power: p,
+                            itemLevel: il,
+                            clearCount: m.clearCount || '0회',
+                        };
+                    });
                 setMembers(normalized);
             } else {
                 setMembers([]);
@@ -124,10 +135,20 @@ export default function StaticPartyList() {
                 // @ts-ignore
                 const res = await scrapeMember(member.name, member.serverId || '1006');
                 if (res.success && res.data) {
+                    let p = parseInt(res.data.power);
+                    let il = parseInt(res.data.itemLevel) || 0;
+
+                    // [Fallback] 서버를 수정하지 않아 숫자가 3977430272 처럼 붙어서 올 경우 대비
+                    if (!il && p > 10000000) {
+                        const s = String(p);
+                        il = parseInt(s.substring(0, 4));
+                        p = parseInt(s.substring(4));
+                    }
+
                     updatedList = updatedList.map(m => m.id === member.id ? {
                         ...m,
-                        power: parseInt(res.data.power),
-                        score: parseInt(res.data.score) || 0,
+                        power: p,
+                        itemLevel: il,
                         class: res.data.class,
                         guild: res.data.guild,
                         lastUpdated: new Date().toISOString()
@@ -150,13 +171,22 @@ export default function StaticPartyList() {
         try {
             const result = await scrapeMember(searchName, searchServer);
             if (result.success && result.data) {
+                let p = parseInt(result.data.power);
+                let il = parseInt(result.data.itemLevel) || 0;
+
+                if (!il && p > 10000000) {
+                    const s = String(p);
+                    il = parseInt(s.substring(0, 4));
+                    p = parseInt(s.substring(4));
+                }
+
                 setSearchResult({
                     id: String(Date.now()),
                     name: result.data.name,
                     rank: '군단병',
                     class: result.data.class,
-                    power: parseInt(result.data.power),
-                    score: parseInt(result.data.score) || 0,
+                    power: p,
+                    itemLevel: il,
                     guild: result.data.guild,
                     isActive: false,
                     clearCount: '0회',
@@ -175,14 +205,23 @@ export default function StaticPartyList() {
         try {
             const res = await scrapeMember(nameToUpdate);
             if (res.success && res.data) {
+                let p = parseInt(res.data.power);
+                let il = parseInt(res.data.itemLevel) || 0;
+
+                if (!il && p > 10000000) {
+                    const s = String(p);
+                    il = parseInt(s.substring(0, 4));
+                    p = parseInt(s.substring(4));
+                }
+
                 let found = false;
                 const newList = members.map(m => {
                     if (m.name === nameToUpdate) {
                         found = true;
                         return {
                             ...m,
-                            power: parseInt(res.data.power),
-                            score: parseInt(res.data.score) || 0,
+                            power: p,
+                            itemLevel: il,
                             class: res.data.class,
                             guild: res.data.guild,
                             lastUpdated: new Date().toISOString()
@@ -223,14 +262,10 @@ export default function StaticPartyList() {
         }
     };
 
-    const [sortBy, setSortBy] = useState<'power' | 'score'>('power');
 
     const sortedMembers = useMemo(() => {
-        return [...members].sort((a, b) => {
-            if (sortBy === 'power') return b.power - a.power;
-            return (b.score || 0) - (a.score || 0);
-        });
-    }, [members, sortBy]);
+        return [...members].sort((a, b) => b.power - a.power);
+    }, [members]);
 
     return (
         <div className="space-y-8 animate-in fade-in duration-700 pb-20">
@@ -271,31 +306,6 @@ export default function StaticPartyList() {
                 </div>
             </div>
 
-            {/* Sort Controls */}
-            <div className="flex items-center gap-2 bg-white/50 dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 w-fit">
-                <button
-                    onClick={() => setSortBy('power')}
-                    className={cn(
-                        "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
-                        sortBy === 'power'
-                            ? "bg-indigo-50 dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm ring-1 ring-indigo-100 dark:ring-0"
-                            : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
-                    )}
-                >
-                    <Zap size={12} /> 전투력 순
-                </button>
-                <button
-                    onClick={() => setSortBy('score')}
-                    className={cn(
-                        "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
-                        sortBy === 'score'
-                            ? "bg-amber-50 dark:bg-amber-600 text-amber-600 dark:text-white shadow-sm ring-1 ring-amber-100 dark:ring-0"
-                            : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
-                    )}
-                >
-                    <Trophy size={12} /> 아툴 점수 순
-                </button>
-            </div>
 
             {/* Progress Bar */}
             {isBatchRunning && (
@@ -362,16 +372,11 @@ export default function StaticPartyList() {
 
                             {/* Stats */}
                             <div className="text-right flex items-center gap-8">
-                                <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'power' ? "opacity-100 scale-100" : "opacity-60 scale-95")}>
-                                    <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">Combat Power</span>
-                                    <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'power' ? "text-3xl text-indigo-500" : "text-xl text-slate-500 dark:text-slate-300")}>
+                                <div className="text-right flex flex-col transition-opacity duration-300">
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">Equipment / Power</span>
+                                    <span className="font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300 text-3xl text-indigo-500">
+                                        <span className="text-[12px] opacity-60 mr-1">[{m.itemLevel || '-'}]</span>
                                         {m.power.toLocaleString()}
-                                    </span>
-                                </div>
-                                <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'score' ? "opacity-100 scale-100" : "opacity-60 scale-95")}>
-                                    <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">AT Score</span>
-                                    <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'score' ? "text-3xl text-amber-500" : "text-xl text-slate-500 dark:text-slate-300")}>
-                                        {(m.score || 0).toLocaleString()}
                                     </span>
                                 </div>
                             </div>

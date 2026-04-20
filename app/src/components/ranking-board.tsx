@@ -3,20 +3,23 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, Clock, Filter, Loader2, Award, Zap, RefreshCw, AlertCircle, Users } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
-import { GuildMember, SERVER_LIST } from './member-list';
+import { GuildMember } from './member-list';
+import { SERVER_LIST, scrapeMember, parsePowerAndItemLevel } from '@/lib/scraper';
 
 import { db } from '@/lib/firebase';
-import { ref, onValue, set, remove } from 'firebase/database';
+import { ref, onValue, set, remove, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
 
-export default function RankingBoard() {
+export default function RankingBoard({ mode: propMode, isAdmin: propAdmin }: { mode?: 'legion' | 'fixed', isAdmin?: boolean }) {
+    const { isAdmin: authAdmin, user, loading: authLoading } = useAuth();
+    const { dbPath, mode: contextMode } = useAppMode();
+    const isAdmin = propAdmin !== undefined ? propAdmin : authAdmin;
+    const mode = propMode || contextMode || 'legion';
     const [data, setData] = useState<GuildMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('All');
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-    const { isAdmin } = useAuth();
-    const { dbPath, mode } = useAppMode();
     const [isBatchRunning, setIsBatchRunning] = useState(false);
     const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
     const [appSettings, setAppSettings] = useState({
@@ -42,11 +45,14 @@ export default function RankingBoard() {
                     // 고정 멤버 랭킹에서는 기본 설정을 바탕으로 이를 보완하여 표시함.
                     const server = m.server || (mode === 'fixed' ? appSettings.serverName : undefined);
                     const faction = m.faction || (server ? (SERVER_LIST as any[]).find((s: any) => s.name === server)?.faction : undefined);
+                    const { power, itemLevel } = parsePowerAndItemLevel(m.power, m.itemLevel);
                     
                     return {
                         ...m,
                         server,
                         faction,
+                        power,
+                        itemLevel,
                         clearCount: m.clearCount || '0회'
                     };
                 });
@@ -103,69 +109,57 @@ export default function RankingBoard() {
             setTimeout(() => {
                 window.removeEventListener('message', handleResponse);
                 resolve({ success: false, error: 'Timeout' });
-            }, 20000); // 20초 대기
+            }, 60000); // 60초 대기 (고성능 스크래퍼 대응)
             window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server: serverName, serverId, faction }, "*");
         });
     };
 
-    const handleRefreshAll = async () => {
-        if (isBatchRunning) return;
-
-        // 5분 쿨타임 체크 (관리자는 무시)
-        if (!isAdmin) {
-            const lastUpdateDate = lastUpdated ? new Date(lastUpdated) : new Date(0);
-            const diffMinutes = (Date.now() - lastUpdateDate.getTime()) / 60000;
-
-            if (diffMinutes < 5) {
-                const remaining = Math.ceil(5 - diffMinutes);
-                alert(`마지막 갱신으로부터 5분간 갱신이 제한됩니다.\n(${remaining}분 후에 다시 시도해주세요)`);
-                return;
-            }
+    const handleRefreshAll = async (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
         }
 
-        if (!confirm(`총 ${data.length}명의 소속 길드원 정보를 갱신합니다.\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
+        if (isBatchRunning) return;
+        if (!window.confirm(`총 ${data.length}명의 소속 길드원 정보를 갱신합니다.\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
 
         setIsBatchRunning(true);
-        setProgress({ current: 0, total: data.length, status: '시작 중...' });
-
-        let updatedList = [...data];
+        const validMembers = data.filter(m => m && m.name);
         let successCount = 0;
 
-        for (let i = 0; i < data.length; i++) {
-            const member = data[i];
-            setProgress({ current: i + 1, total: data.length, status: `${member.name} 갱신 중...` });
+        for (let i = 0; i < validMembers.length; i++) {
+            const member = validMembers[i];
+            setProgress({ current: i + 1, total: validMembers.length, status: `${member.name} 갱신 중...` });
 
             try {
                 const targetServerId = member.server ? ((SERVER_LIST as any[]).find(s => s.name === member.server)?.id || '1006') : '1006';
                 const res = await scrapeMember(member.name, targetServerId);
                 if (res.success && res.data) {
-                    updatedList[i] = {
-                        ...member,
-                        power: parseInt(res.data.power),
-                        score: parseInt(res.data.score) || 0,
+                    const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
+                    // Individual update for robustness
+                    await update(ref(db, `${dbPath.members}/${member.id}`), {
+                        power,
+                        itemLevel,
                         class: res.data.class,
                         guild: res.data.guild,
                         isActive: (res.data.guild === appSettings.guildName),
                         lastUpdated: new Date().toISOString()
-                    };
+                    });
                     successCount++;
                 }
-            } catch (e) { console.error(e); }
-            await new Promise(r => setTimeout(r, 1000));
+            } catch (e) {
+                console.error(`Refresh error for ${member.name}:`, e);
+            }
+            if (i < validMembers.length - 1) await new Promise(r => setTimeout(r, 1000));
         }
 
-        // Save back to server
         try {
-            await set(ref(db, dbPath.members), updatedList);
-            // [New] Update Last Full Refresh Timestamp
             await set(ref(db, dbPath.lastFullRefresh), new Date().toISOString());
-        } catch (e) {
-            console.error("Failed to save refreshed data:", e);
-            alert("저장 실패! (Firebase 오류)");
-        }
+        } catch (e) { }
 
         setIsBatchRunning(false);
-        alert(`갱신 완료! (성공: ${successCount}/${data.length})`);
+        alert(`갱신 완료! (성공: ${successCount}/${validMembers.length})`);
     };
 
     const handleManualUpdate = async () => {
@@ -182,21 +176,17 @@ export default function RankingBoard() {
             const targetServerId = targetMember.server ? ((SERVER_LIST as any[]).find(s => s.name === targetMember.server)?.id || '1006') : '1006';
             const res = await scrapeMember(manualUpdateName, targetServerId);
             if (res.success && res.data) {
-                const updatedList = data.map(m => m.name === manualUpdateName.trim() ? {
-                    ...m,
-                    power: parseInt(res.data.power),
-                    score: parseInt(res.data.score) || 0,
+                const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
+                // Update single member in Firebase
+                await update(ref(db, `${dbPath.members}/${targetMember.id}`), {
+                    power,
+                    itemLevel,
                     class: res.data.class,
                     guild: res.data.guild,
                     isActive: (res.data.guild === appSettings.guildName),
                     lastUpdated: new Date().toISOString()
-                } : m);
-
-                // Optimistic update
-                setData(updatedList);
-
-                // Save to Firebase
-                await set(ref(db, dbPath.members), updatedList);
+                });
 
                 alert(`${manualUpdateName} 갱신 완료!`);
                 setManualUpdateName(''); // Clear input on success
@@ -212,7 +202,7 @@ export default function RankingBoard() {
     };
 
     // Sorting State
-    const [sortBy, setSortBy] = useState<'power' | 'score'>('power');
+    const [sortBy, setSortBy] = useState<'power' | 'itemLevel'>('power');
 
     const filtered = data
         .filter(m => m && m.name && m.id) // 1. 유효한 데이터만 필터링
@@ -224,8 +214,8 @@ export default function RankingBoard() {
         }, [] as GuildMember[])
         .filter(m => activeTab === 'All' ? true : m.class === activeTab)
         .sort((a, b) => {
-            if (sortBy === 'power') return b.power - a.power;
-            return (b.score || 0) - (a.score || 0);
+            if (sortBy === 'itemLevel') return (b.itemLevel || 0) - (a.itemLevel || 0);
+            return b.power - a.power;
         });
 
     return (
@@ -288,7 +278,7 @@ export default function RankingBoard() {
 
                     <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-0 hidden md:block" />
                     <button
-                        onClick={handleRefreshAll}
+                        onClick={(e) => handleRefreshAll(e)}
                         disabled={isBatchRunning}
                         className="glass-btn flex items-center gap-3 h-12 px-6"
                     >
@@ -319,6 +309,18 @@ export default function RankingBoard() {
                 {/* Sort Buttons */}
                 <div className="flex items-center gap-2 bg-white/50 dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700">
                     <button
+                        onClick={() => setSortBy('itemLevel')}
+                        className={cn(
+                            "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
+                            sortBy === 'itemLevel'
+                                ? "bg-purple-50 dark:bg-purple-600 text-purple-600 dark:text-white shadow-sm ring-1 ring-purple-100 dark:ring-0"
+                                : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
+                        )}
+                    >
+                        <Award size={12} />
+                        장비 레벨 순
+                    </button>
+                    <button
                         onClick={() => setSortBy('power')}
                         className={cn(
                             "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
@@ -329,18 +331,6 @@ export default function RankingBoard() {
                     >
                         <Zap size={12} />
                         전투력 순
-                    </button>
-                    <button
-                        onClick={() => setSortBy('score')}
-                        className={cn(
-                            "px-4 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center gap-2 uppercase tracking-tight",
-                            sortBy === 'score'
-                                ? "bg-amber-50 dark:bg-amber-600 text-amber-600 dark:text-white shadow-sm ring-1 ring-amber-100 dark:ring-0"
-                                : "text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-200"
-                        )}
-                    >
-                        <Trophy size={12} />
-                        아툴 점수 순
                     </button>
                 </div>
             </div>
@@ -392,19 +382,22 @@ export default function RankingBoard() {
                                     </div>
                                 </div>
 
-                                <div className="text-right flex items-center gap-8">
-                                    <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'power' ? "opacity-100 scale-100" : "opacity-60 dark:opacity-80 scale-95")}>
-                                        <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">Combat Power</span>
+                                <div className="text-right flex items-center gap-8 lg:gap-12">
+                                    {/* Metrics Group */}
+                                    <div className={cn("text-right flex flex-col transition-all duration-300", sortBy === 'itemLevel' ? "opacity-100 scale-100" : "opacity-60 dark:opacity-80 scale-95")}>
+                                        <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">EQUIPMENT</span>
+                                        <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'itemLevel' ? "text-3xl text-purple-500" : "text-xl text-slate-500 dark:text-slate-300")}>
+                                            {(m.itemLevel || 0).toLocaleString()}
+                                        </span>
+                                    </div>
+
+                                    <div className={cn("text-right flex flex-col transition-all duration-300", sortBy === 'power' ? "opacity-100 scale-100" : "opacity-60 dark:opacity-80 scale-95")}>
+                                        <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">COMBAT POWER</span>
                                         <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'power' ? "text-3xl text-indigo-500" : "text-xl text-slate-500 dark:text-slate-300")}>
                                             {m.power.toLocaleString()}
                                         </span>
                                     </div>
-                                    <div className={cn("flex flex-col transition-opacity duration-300", sortBy === 'score' ? "opacity-100 scale-100" : "opacity-60 dark:opacity-80 scale-95")}>
-                                        <span className="text-[10px] text-slate-400 dark:text-slate-300 font-black uppercase tracking-[0.2em] mb-1">AT SCORE</span>
-                                        <span className={cn("font-black tracking-tighter tabular-nums drop-shadow-sm transition-colors duration-300", sortBy === 'score' ? "text-3xl text-amber-500" : "text-xl text-slate-500 dark:text-slate-300")}>
-                                            {(m.score || 0).toLocaleString()}
-                                        </span>
-                                    </div>
+
                                 </div>
                             </div>
                         ))}

@@ -1,26 +1,38 @@
 'use client';
+import { toast } from 'sonner';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, List, Pin } from 'lucide-react';
+import { RefreshCw, Users, Search, Plus, Trash2, Settings, X, Check, Loader2, Clock, AlertCircle, ChevronDown, List, Pin, Zap, Edit2, HelpCircle } from 'lucide-react';
 import { cn, formatRelativeTime, getClassColor, getJobShortName } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { ref, onValue, set, remove } from 'firebase/database';
+import { ref, onValue, set, remove, update } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
-import { SERVER_LIST, GuildMember } from './member-list';
+import { GuildMember } from './member-list';
+import { SERVER_LIST, scrapeMember, parsePowerAndItemLevel } from '@/lib/scraper';
 
 interface SubCharacter extends Omit<GuildMember, 'rank' | 'clearCount' | 'isActive'> {
     ownerName: string;
     raidOptIn?: boolean;
+    isPrivate?: boolean;
+    aetherEnergy?: number;
+    aetherEnergyLastUpdated?: string;
+    aetherCharged?: number;
 }
 
 const CLASSES = ['수호성', '검성', '살성', '궁성', '마도성', '정령성', '치유성', '호법성'];
 
-export default function SubCharacterList() {
-    const { isAdmin, user, loading } = useAuth();
-    const { dbPath } = useAppMode();
+export default function SubCharacterList({ mode: propMode, isAdmin: propAdmin }: { mode?: 'legion' | 'fixed', isAdmin?: boolean }) {
+    const { isAdmin: authAdmin, user, loading: authLoading } = useAuth();
+    const { dbPath, mode: contextMode } = useAppMode();
+    
+    // Props take precedence over context
+    const isAdmin = propAdmin !== undefined ? propAdmin : authAdmin;
+    const mode = propMode || contextMode || 'legion';
+
     const [subChars, setSubChars] = useState<SubCharacter[]>([]);
     const [mainMembers, setMainMembers] = useState<any[]>([]);
+    const [currentTime, setCurrentTime] = useState(new Date());
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [isManageMode, setIsManageMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -31,6 +43,11 @@ export default function SubCharacterList() {
     useEffect(() => {
         const saved = localStorage.getItem('pinnedOwner');
         if (saved) setPinnedOwner(saved);
+
+        const timer = setInterval(() => {
+            setCurrentTime(new Date());
+        }, 60000);
+        return () => clearInterval(timer);
     }, []);
 
     const togglePin = (owner: string) => {
@@ -53,18 +70,323 @@ export default function SubCharacterList() {
     const [isBatchRunning, setIsBatchRunning] = useState(false);
     const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
 
+    // Aether Energy Logic
+    const getAetherTickCount = (lastUpdatedIso: string) => {
+        const last = new Date(lastUpdatedIso);
+        const now = new Date();
+        if (last > now) return 0;
+
+        let ticks = 0;
+        const tickHours = [2, 5, 8, 11, 14, 17, 20, 23];
+        
+        // Start from the beginning of the hour of 'last'
+        let check = new Date(last);
+        check.setMinutes(0, 0, 0);
+        check.setMilliseconds(0);
+
+        // Iteratively move forward hour by hour
+        while (check <= now) {
+            if (tickHours.includes(check.getHours())) {
+                // Only count if this specific tick (HH:00:00) happened AFTER 'last'
+                if (check > last && check <= now) {
+                    ticks++;
+                }
+            }
+            check.setHours(check.getHours() + 1);
+        }
+        return ticks;
+    };
+
+    const getCurrentAether = (char: SubCharacter | GuildMember) => {
+        const baseEnergy = char.aetherEnergy ?? 0;
+        
+        // Use aetherEnergyLastUpdated as primary.
+        // If missing, use a stable fallback to prevent resets during hourly refreshes.
+        // Character IDs are created using Date.now(), so they serve as a perfect stable fallback.
+        let lastRefTime = char.aetherEnergyLastUpdated;
+        
+        if (!lastRefTime) {
+            const idTimestamp = parseInt(char.id);
+            if (!isNaN(idTimestamp) && idTimestamp > 1000000000000) { // Valid timestamp check
+                lastRefTime = new Date(idTimestamp).toISOString();
+            } else {
+                lastRefTime = char.lastUpdated || new Date().toISOString();
+            }
+        }
+        
+        const ticks = getAetherTickCount(lastRefTime);
+        const recovered = ticks * 15;
+        // Maximum Base Energy is 840
+        return Math.min(840, baseEnergy + recovered);
+    };
+
+    const getAetherPrediction = (char: SubCharacter) => {
+        const currentBase = getCurrentAether(char);
+        if (currentBase >= 840) return "오드가 가득 찼습니다! (낭비 중)";
+        
+        const tickHours = [2, 5, 8, 11, 14, 17, 20, 23];
+        
+        // Find next tick
+        let nextTick = new Date(currentTime);
+        nextTick.setMinutes(0, 0, 0);
+        nextTick.setSeconds(0);
+        nextTick.setMilliseconds(0);
+        
+        for (let i = 0; i < 24; i++) {
+            nextTick.setHours(nextTick.getHours() + 1);
+            if (tickHours.includes(nextTick.getHours())) {
+                break;
+            }
+        }
+        
+        const diffMs = nextTick.getTime() - currentTime.getTime();
+        const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffMins = Math.floor((diffMs / (1000 * 60)) % 60);
+        
+        const nextTimeStr = `${diffHrs > 0 ? `${diffHrs}시간 ` : ""}${diffMins}분 후 +15 회복`;
+        
+        const ticksNeeded = Math.ceil((840 - currentBase) / 15);
+        if (ticksNeeded <= 1) return nextTimeStr;
+        
+        const totalHrs = (ticksNeeded - 1) * 3 + diffHrs;
+        const fullDays = Math.floor(totalHrs / 24);
+        const remainingHrs = totalHrs % 24;
+        
+        const fullTimeStr = `전체 회복까지 약 ${fullDays > 0 ? `${fullDays}일 ` : ""}${remainingHrs}시간 ${diffMins}분`;
+        return `${nextTimeStr}\n${fullTimeStr}`;
+    };
+
+    const getNextTickCountdown = () => {
+        const tickHours = [2, 5, 8, 11, 14, 17, 20, 23];
+        let nextTick = new Date(currentTime);
+        nextTick.setMinutes(0, 0, 0);
+        nextTick.setSeconds(0);
+        nextTick.setMilliseconds(0);
+        
+        for (let i = 0; i < 24; i++) {
+            nextTick.setHours(nextTick.getHours() + 1);
+            if (tickHours.includes(nextTick.getHours())) {
+                break;
+            }
+        }
+        
+        const diffMs = nextTick.getTime() - currentTime.getTime();
+        const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffMins = Math.floor((diffMs / (1000 * 60)) % 60);
+        
+        return `${diffHrs > 0 ? `${diffHrs}시간 ` : ""}${diffMins}분`;
+    };
+
+    const [editingAether, setEditingAether] = useState<{ id: string, base: string, charged: string, isMain?: boolean } | null>(null);
+    const aetherInputRef = React.useRef<HTMLInputElement>(null);
+
     useEffect(() => {
-        if (loading) return;
+        if (editingAether && aetherInputRef.current) {
+            aetherInputRef.current.focus();
+        }
+    }, [editingAether?.id]); // Only focus when opening a new character's modal
+
+    const handleUpdateAether = async (id: string, base: string, charged: string, isMain?: boolean) => {
+        const b = parseInt(base);
+        const c = parseInt(charged) || 0;
+        if (isNaN(b)) return;
+        
+        const basePath = isMain ? dbPath.members : dbPath.subCharacters;
+        
+        await set(ref(db, `${basePath}/${id}/aetherEnergy`), Math.min(840, b));
+        await set(ref(db, `${basePath}/${id}/aetherCharged`), Math.min(2000, c));
+        await set(ref(db, `${basePath}/${id}/aetherEnergyLastUpdated`), new Date().toISOString());
+        setEditingAether(null);
+    };
+
+    const handleConsumeAether = async (c: SubCharacter | GuildMember, isMain?: boolean) => {
+        const currentBase = getCurrentAether(c);
+        const currentCharged = c.aetherCharged || 0;
+        const total = currentBase + currentCharged;
+        
+        if (total < 80) return; // Not enough energy
+        
+        let newBase = currentBase;
+        let newCharged = currentCharged;
+        
+        // Priority: Use Base energy first to allow it to recover
+        if (newBase >= 80) {
+            newBase -= 80;
+        } else {
+            const remainder = 80 - newBase;
+            newBase = 0;
+            newCharged = Math.max(0, newCharged - remainder);
+        }
+        
+        const basePath = isMain ? dbPath.members : dbPath.subCharacters;
+        
+        await set(ref(db, `${basePath}/${c.id}/aetherEnergy`), newBase);
+        await set(ref(db, `${basePath}/${c.id}/aetherCharged`), newCharged);
+        await set(ref(db, `${basePath}/${c.id}/aetherEnergyLastUpdated`), new Date().toISOString());
+    };
+
+    const renderAetherCell = (char: SubCharacter | GuildMember, isMain?: boolean) => {
+        const isEditing = editingAether?.id === char.id && !!editingAether?.isMain === !!isMain;
+        const currentEnergy = getCurrentAether(char);
+        const totalEnergy = currentEnergy + (char.aetherCharged || 0);
+
+        if (isEditing) {
+            return (
+                <div className="flex flex-col items-center justify-center gap-1.5 h-full min-w-[140px]" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5 bg-slate-800 dark:bg-slate-800/80 rounded-full px-3 py-1 shadow-inner border border-slate-700/50">
+                        <input
+                            ref={aetherInputRef}
+                            type="number"
+                            className="bg-transparent text-white w-9 text-center text-xs font-black outline-none placeholder:text-slate-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            value={editingAether.base}
+                            onChange={(e) => setEditingAether(prev => prev ? { ...prev, base: e.target.value } : null)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    handleUpdateAether(editingAether.id, editingAether.base, editingAether.charged, editingAether.isMain);
+                                }
+                            }}
+                        />
+                        <RefreshCw size={10} className="text-slate-400" />
+                        <span className="text-slate-400 text-[10px] font-black">+</span>
+                        <input
+                            type="number"
+                            className="bg-transparent text-cyan-400 w-9 text-center text-xs font-black outline-none placeholder:text-cyan-800/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            value={editingAether.charged}
+                            onChange={(e) => setEditingAether(prev => prev ? { ...prev, charged: e.target.value } : null)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    handleUpdateAether(editingAether.id, editingAether.base, editingAether.charged, editingAether.isMain);
+                                }
+                            }}
+                        />
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); handleUpdateAether(editingAether.id, editingAether.base, editingAether.charged, editingAether.isMain); }}
+                            className="bg-indigo-500 hover:bg-indigo-400 text-white text-[10px] font-black px-2.5 py-0.5 rounded transition-colors"
+                        >
+                            적용
+                        </button>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingAether(null); }}
+                            className="bg-slate-600 hover:bg-slate-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded transition-colors"
+                        >
+                            취소
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="flex items-center justify-center h-full">
+                <div 
+                    className={cn(
+                        "flex items-stretch bg-white dark:bg-slate-900/40 rounded-xl border border-slate-100 dark:border-slate-800/60 shadow-sm overflow-hidden transition-all hover:shadow-md hover:border-slate-200 dark:hover:border-slate-700 relative",
+                        currentEnergy >= 840 && "animate-pulse border-red-300 dark:border-red-900 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-red-50/30 dark:bg-red-900/10"
+                    )    
+}
+                    title={getAetherPrediction(char as SubCharacter)}
+                >
+                    {/* Energy Info Section */}
+                    <div 
+                        onClick={() => setEditingAether({ 
+                            id: char.id, 
+                            base: currentEnergy.toString(), 
+                            charged: (char.aetherCharged || 0).toString(),
+                            isMain 
+                        })}
+                        className="group/energy relative flex items-center gap-2.5 px-2.5 py-2 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/50 transition-colors min-w-[80px]"
+                    >
+                        <div className="flex-shrink-0 relative">
+                            <Zap size={14} className={cn(
+                                "transition-transform group-hover/energy:scale-110",
+                                currentEnergy >= 840 
+                                    ? "text-red-500 fill-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]" 
+                                    : "text-cyan-400 fill-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]"
+                            )} />
+                        </div>
+                        <div className="flex flex-col items-start">
+                            <span className={cn(
+                                "font-black tracking-tight text-sm leading-none mb-0.5",
+                                currentEnergy >= 840 ? "text-red-600 dark:text-red-400" : "text-slate-800 dark:text-slate-100"
+                            )}>
+                                {currentEnergy}
+                            </span>
+                            <span className="text-[12px] font-black text-cyan-600 dark:text-cyan-400 leading-none">
+                                +{char.aetherCharged || 0}
+                            </span>
+                        </div>
+                        <div className="absolute top-1 right-1 opacity-0 group-hover/energy:opacity-100 transition-opacity">
+                            <Edit2 size={8} className="text-slate-400" />
+                        </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="w-px bg-slate-100 dark:bg-slate-800/60 my-1.5" />
+
+                    {/* Cube Action Section */}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (totalEnergy < 80) {
+                                toast.error("오드 에너지가 부족하여 큐브를 열 수 없습니다.");
+                                return;
+                            }
+                            handleConsumeAether(char, isMain);
+                        }}
+                        className={cn(
+                            "group/spend flex items-center justify-center px-2 min-w-[36px] transition-all outline-none",
+                            totalEnergy >= 80
+                                ? "hover:bg-cyan-500 text-cyan-500 hover:text-white"
+                                : "text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50"
+                        )}
+                        title="오드 80 소모 (큐브 보상)"
+                    >
+                        <div className="flex flex-col items-center gap-0.5">
+                            <div className="flex flex-col items-center text-[10px] font-black leading-[0.9] tracking-tighter">
+                                <span>큐</span>
+                                <span>브</span>
+                            </div>
+                            <div className="w-2.5 h-0.5 rounded-full bg-current opacity-30 group-hover/spend:w-3.5 transition-all" />
+                        </div>
+                    </button>
+
+                    {/* Progress Bar */}
+                    <div className="absolute bottom-0 left-0 h-0.5 bg-slate-200 dark:bg-slate-800 w-full overflow-hidden">
+                        <div 
+                            className={cn(
+                                "h-full transition-all duration-1000",
+                                currentEnergy >= 840 ? "bg-red-500" : "bg-cyan-400"
+                            )}
+                            style={{ width: `${Math.min(100, (currentEnergy / 840) * 100)}%` }}
+                        />
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    useEffect(() => {
+        if (authLoading) return;
 
         // Fetch Sub-characters
         const subCharsRef = ref(db, dbPath.subCharacters || 'sub_characters');
         const unsubscribeSub = onValue(subCharsRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                const list = Object.entries(data).map(([key, val]: [string, any]) => ({
-                    ...val,
-                    id: key
-                }));
+                const list = Object.entries(data).map(([key, val]: [string, any]) => {
+                    const { power, itemLevel } = parsePowerAndItemLevel(val.power, val.itemLevel);
+
+                    return {
+                        ...val,
+                        id: key,
+                        power: power || 0,
+                        itemLevel: itemLevel || 0
+                    };
+                });
 
                 // Deduplicate by name if duplicates exist
                 const uniqueList = Array.from(new Map(list.map(item => [item.name, item])).values());
@@ -87,7 +409,10 @@ export default function SubCharacterList() {
         const unsubscribeMain = onValue(mainMembersRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
-                const list = Object.values(data);
+                const list = Object.entries(data).map(([key, m]: [string, any]) => {
+                    const { power, itemLevel } = parsePowerAndItemLevel(m.power, m.itemLevel);
+                    return { ...m, id: key, power, itemLevel };
+                });
                 setMainMembers(list);
             } else {
                 setMainMembers([]);
@@ -105,57 +430,78 @@ export default function SubCharacterList() {
             unsubscribeMain();
             unsubscribeMeta();
         };
-    }, [user, loading, dbPath]);
+    }, [user, authLoading, dbPath]);
 
-    const handleRefreshAll = async () => {
+    const handleRefreshAll = async (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
         if (isBatchRunning) return;
-        if (!confirm(`전체 ${subChars.length}명의 정보를 갱신하시겠습니까?\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
+        if (!window.confirm(`전체 ${subChars.length}명의 정보를 갱신하시겠습니까?\n시간이 다소 소요될 수 있습니다. 진행하시겠습니까?`)) return;
 
         setIsBatchRunning(true);
         const validChars = subChars.filter(c => c && c.name);
-        let updatedList = [...subChars];
         let successCount = 0;
 
         for (let i = 0; i < validChars.length; i++) {
             const char = validChars[i];
-            setProgress({ current: i + 1, total: validChars.length, status: '갱신 중...' });
+            setProgress({ current: i + 1, total: validChars.length, status: `${char.name} 갱신 중...` });
 
             try {
                 const targetServerId = char.server ? (SERVER_LIST.find(s => s.name === char.server)?.id || '1006') : '1006';
                 const res = await scrapeMember(char.name, targetServerId);
                 if (res.success && res.data) {
-                    updatedList = updatedList.map(c => c.id === char.id ? {
-                        ...c,
-                        power: parseInt(res.data.power) || 0,
-                        score: parseInt(res.data.score) || 0,
+                    const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
+                    // Individual update for robustness
+                    await update(ref(db, `${dbPath.subCharacters}/${char.id}`), {
+                        power,
+                        itemLevel,
                         class: res.data.class,
                         guild: res.data.guild,
                         lastUpdated: new Date().toISOString()
-                    } : c);
+                    });
                     successCount++;
                 }
-            } catch (e) { }
-            if (i < validChars.length - 1) await new Promise(r => setTimeout(r, 4000));
+            } catch (e) {
+                console.error(`Refresh error for ${char.name}:`, e);
+            }
+            if (i < validChars.length - 1) await new Promise(r => setTimeout(r, 2000));
         }
 
         try {
-            // 한 번에 덮어쓰기 위해 Map 형태로 변환 (Firebase 딕셔너리 구조 유지)
-            const updatesMap: Record<string, any> = {};
-            updatedList.forEach(c => {
-                const { id, ...rest } = c;
-                updatesMap[id] = { id, ...rest };
-            });
-
-            await set(ref(db, dbPath.subCharacters), updatesMap);
             await set(ref(db, dbPath.subCharsLastRefresh), new Date().toISOString());
-            setSubChars(updatedList); // Update local state directly
+        } catch (e) { }
+
+        setIsBatchRunning(false);
+        setProgress({ current: 0, total: 0, status: '' });
+        alert(`갱신 완료! (성공: ${successCount}/${validChars.length})`);
+    };
+
+    const handleSingleRefresh = async (char: SubCharacter) => {
+        if (isBatchRunning) return;
+        
+        try {
+            const targetServerId = char.server ? (SERVER_LIST.find(s => s.name === char.server)?.id || '1006') : '1006';
+            const res = await scrapeMember(char.name, targetServerId);
+            if (res.success && res.data) {
+                const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
+                await update(ref(db, `${dbPath.subCharacters}/${char.id}`), {
+                    power,
+                    itemLevel,
+                    class: res.data.class,
+                    guild: res.data.guild,
+                    lastUpdated: new Date().toISOString()
+                });
+                toast.success(`${char.name} 정보 갱신 완료`);
+            } else {
+                toast.error(`${char.name} 갱신 실패: ${res.error || '데이터 없음'}`);
+            }
         } catch (e) {
-            console.error("Failed to save refreshed batch data:", e);
-            alert("갱신된 정보 저장 실패!");
-        } finally {
-            setIsBatchRunning(false);
-            setProgress({ current: 0, total: 0, status: '' });
-            alert(`갱신 완료! (성공: ${successCount}/${validChars.length})`);
+            toast.error(`${char.name} 갱신 중 오류 발생`);
         }
     };
 
@@ -185,7 +531,7 @@ export default function SubCharacterList() {
             setTimeout(() => {
                 window.removeEventListener('message', handleResponse);
                 resolve({ success: false, error: 'Timeout' });
-            }, 20000);
+            }, 60000); // 60초 대기 (고성능 스크래퍼 대응)
             window.postMessage({ type: 'AONI_SEARCH_REQUEST', name, server: serverName, serverId, faction }, "*");
         });
     };
@@ -197,15 +543,20 @@ export default function SubCharacterList() {
         try {
             const res = await scrapeMember(searchName, searchServer);
             if (res.success && res.data) {
+                const { power, itemLevel } = parsePowerAndItemLevel(res.data.power, res.data.itemLevel);
+
                 setSearchResult({
                     id: Date.now().toString(),
                     name: res.data.name,
                     class: res.data.class,
-                    power: res.data.power,
-                    score: res.data.score || 0,
+                    power,
+                    itemLevel,
                     guild: res.data.guild,
-                    server: SERVER_LIST.find(s => s.id === searchServer)?.name || '아리엘',
+                    server: SERVER_LIST.find(s => s.name === searchServer)?.name || '아리엘',
                     ownerName: ownerName,
+                    aetherEnergy: 75, // Initial energy for new characters
+                    aetherEnergyLastUpdated: new Date().toISOString(),
+                    aetherCharged: 0,
                     lastUpdated: new Date().toISOString()
                 } as SubCharacter);
             } else {
@@ -233,10 +584,12 @@ export default function SubCharacterList() {
                 name: searchName,
                 class: cls,
                 power: pwr,
-                score: 0,
                 guild: '-',
                 server: SERVER_LIST.find(s => s.id === searchServer)?.name || '아리엘',
                 ownerName: ownerName.trim(),
+                aetherEnergy: 75,
+                aetherEnergyLastUpdated: new Date().toISOString(),
+                aetherCharged: 0,
                 lastUpdated: new Date().toISOString()
             });
             closeModal();
@@ -262,9 +615,13 @@ export default function SubCharacterList() {
         setSelectedIds([]);
     };
 
+    const visibleSubChars = useMemo(() => {
+        return isAdmin ? subChars : subChars.filter(c => !c.isPrivate);
+    }, [subChars, isAdmin]);
+
     const groupedChars = useMemo(() => {
         const groups: Record<string, SubCharacter[]> = {};
-        subChars.forEach(c => {
+        visibleSubChars.forEach(c => {
             if (!groups[c.ownerName]) groups[c.ownerName] = [];
             groups[c.ownerName].push(c);
         });
@@ -275,12 +632,12 @@ export default function SubCharacterList() {
         });
 
         return groups;
-    }, [subChars]);
+    }, [visibleSubChars]);
 
     const groupedByClass = useMemo(() => {
         const groups: Record<string, SubCharacter[]> = {};
         CLASSES.forEach(cls => groups[cls] = []);
-        subChars.forEach(c => {
+        visibleSubChars.forEach(c => {
             if (groups[c.class] && (c.power || 0) >= 2700 && c.raidOptIn !== false) groups[c.class].push(c);
         });
 
@@ -290,7 +647,7 @@ export default function SubCharacterList() {
         });
 
         return groups;
-    }, [subChars]);
+    }, [visibleSubChars]);
 
     const classStats = useMemo(() => {
         const stats: Record<string, { main: number, sub: number }> = {};
@@ -299,11 +656,11 @@ export default function SubCharacterList() {
         mainMembers.forEach(m => {
             if (stats[m.class] && (m.power || 0) >= 2700) stats[m.class].main++;
         });
-        subChars.forEach(c => {
+        visibleSubChars.forEach(c => {
             if (stats[c.class] && (c.power || 0) >= 2700 && c.raidOptIn !== false) stats[c.class].sub++;
         });
         return stats;
-    }, [mainMembers, subChars]);
+    }, [mainMembers, visibleSubChars]);
 
     return (
         <div className="space-y-8 animate-in fade-in duration-700">
@@ -317,7 +674,7 @@ export default function SubCharacterList() {
                     <div className="flex items-center gap-4 mt-3 font-medium">
                         <div className="text-slate-500 dark:text-slate-300 text-sm flex items-center gap-2">
                             <Users size={14} className="text-indigo-400" />
-                            {subChars.length}개의 부캐릭터가 존재합니다.
+                            {visibleSubChars.length}개의 부캐릭터가 존재합니다.
                             <div className="group relative flex items-center">
                                 <AlertCircle size={14} className="text-slate-400 cursor-help" />
                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-10">
@@ -376,7 +733,7 @@ export default function SubCharacterList() {
                                 <button onClick={() => { setIsManageMode(false); setSelectedIds([]); }} className="px-4 py-2 text-sm font-black text-slate-400 hover:text-slate-600 transition-all">닫기</button>
                             </div>
                         )}
-                        <button onClick={handleRefreshAll} disabled={isBatchRunning} className="glass-btn flex items-center gap-3 h-12 px-6">
+                        <button onClick={(e) => handleRefreshAll(e)} disabled={isBatchRunning} className="glass-btn flex items-center gap-3 h-12 px-6">
                             {isBatchRunning ? `갱신 중...` : "전체 정보 갱신"}
                             <RefreshCw className={cn("w-5 h-5", isBatchRunning && "animate-spin")} />
                         </button>
@@ -390,7 +747,7 @@ export default function SubCharacterList() {
                         <Loader2 className="animate-spin text-indigo-500" size={40} />
                         <p className="font-bold">데이터를 불러오는 중입니다...</p>
                     </div>
-                ) : subChars.length === 0 ? (
+                ) : visibleSubChars.length === 0 ? (
                     <div className="glass-panel py-20 text-center text-slate-400 font-bold">등록된 부캐 정보가 없습니다.</div>
                 ) : viewMode === 'owner' ? (
                     /* Grouped by Owner */
@@ -410,7 +767,7 @@ export default function SubCharacterList() {
                             const ownerClass = ownerInfo?.class || '';
 
                             return (
-                                <div key={owner} className="glass-panel overflow-hidden">
+                                <div key={owner} className="glass-panel overflow-visible">
                                     <div className="px-8 py-5 bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
                                         <div className="flex items-center gap-4">
                                             <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0", getClassColor(ownerClass))}>
@@ -428,6 +785,11 @@ export default function SubCharacterList() {
                                                         {owner}
                                                     </a>
                                                     <span className="text-slate-400 font-bold text-sm">의 부캐 목록</span>
+                                                    {ownerInfo && (
+                                                        <div className="ml-4">
+                                                            {renderAetherCell(ownerInfo, true)}
+                                                        </div>
+                                                    )}
                                                     <button
                                                         onClick={() => togglePin(owner)}
                                                         className={cn("ml-2 p-1.5 rounded-lg transition-all", pinnedOwner === owner ? "bg-amber-100 text-amber-500 dark:bg-amber-900/30 dark:text-amber-400" : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600")}
@@ -440,17 +802,31 @@ export default function SubCharacterList() {
                                         </div>
                                         <span className="text-xs font-black text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-4 py-1.5 rounded-full uppercase tracking-widest">{chars.length} SUB-CHARS</span>
                                     </div>
-                                    <div className="overflow-x-auto">
+                                    <div className="overflow-x-auto pt-10 -mt-10">
                                         <table className="w-full text-left text-sm text-slate-500 dark:text-slate-300 table-fixed">
                                             <thead className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 dark:border-slate-800">
                                                 <tr>
                                                     {isManageMode && isAdmin && <th className="w-16 px-5 py-4 text-center">선택</th>}
                                                     <th className="w-40 px-8 py-4 text-left">닉네임</th>
                                                     <th className="w-40 px-8 py-4 text-center">직업</th>
+                                                    <th className="w-32 px-8 py-4 text-center">장비 레벨</th>
                                                     <th className="w-32 px-8 py-4 text-center">전투력</th>
-                                                    <th className="w-32 px-8 py-4 text-center">아툴 점수</th>
+                                                                                                         <th className="w-32 px-8 py-4 text-center">
+                                                         <div className="flex items-center justify-center gap-1.5">
+                                                             오드 에너지
+                                                             <div className="group relative flex items-center">
+                                                                 <HelpCircle size={14} className="text-slate-400 cursor-help" />
+                                                                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-slate-800 text-white text-[11px] rounded-xl whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-20 font-bold border border-slate-700">
+                                                                     주기 충전까지 남은 시간: <span className="text-cyan-400">{getNextTickCountdown()}</span>
+                                                                     <div className="absolute left-1/2 -translate-x-1/2 top-full border-4 border-transparent border-t-slate-800"></div>
+                                                                 </div>
+                                                             </div>
+                                                         </div>
+                                                     </th>
+
                                                     <th className="w-32 px-8 py-4 text-center">서버</th>
                                                     <th className="w-28 px-4 py-4 text-center text-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10">성역 매칭 희망</th>
+                                                    {isAdmin && <th className="w-24 px-4 py-4 text-center text-rose-500 bg-rose-50/50 dark:bg-rose-900/10">비공개</th>}
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
@@ -464,19 +840,31 @@ export default function SubCharacterList() {
                                                             </td>
                                                         )}
                                                         <td className="w-40 px-8 py-5 font-black text-slate-700 dark:text-slate-200">
-                                                            <a 
-                                                                href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === c.server)?.id || '1006'}/${encodeURIComponent(c.name)}`} 
-                                                                target="_blank" 
-                                                                rel="noopener noreferrer"
-                                                                className="truncate hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4 block" 
-                                                                title={`${c.name} 아툴 정보 보기`}
-                                                            >
-                                                                {c.name}
-                                                            </a>
+                                                            <div className="flex items-center gap-2 group/nick">
+                                                                <a 
+                                                                    href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === c.server)?.id || '1006'}/${encodeURIComponent(c.name)}`} 
+                                                                    target="_blank" 
+                                                                    rel="noopener noreferrer"
+                                                                    className="truncate hover:text-indigo-500 hover:underline transition-all decoration-2 underline-offset-4 block" 
+                                                                    title={`${c.name} 아툴 정보 보기`}
+                                                                >
+                                                                    {c.name}
+                                                                </a>
+                                                                <button 
+                                                                    onClick={() => handleSingleRefresh(c)}
+                                                                    className="p-1 text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-700 rounded transition-all opacity-0 group-hover/nick:opacity-100"
+                                                                    title="이 캐릭터만 갱신"
+                                                                >
+                                                                    <RefreshCw size={12} className={isBatchRunning ? "animate-spin" : ""} />
+                                                                </button>
+                                                            </div>
                                                         </td>
                                                         <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
+                                                        <td className="w-32 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.itemLevel?.toLocaleString() || '-'}</td>
                                                         <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
-                                                        <td className="w-32 px-8 py-5 text-center font-bold text-amber-500">{(c.score || 0).toLocaleString()}</td>
+                                                        <td className="w-32 px-8 py-5 text-center">
+                                                            {renderAetherCell(c)}
+                                                        </td>
                                                         <td className="w-32 px-8 py-5 text-center font-bold text-slate-400">{c.server}</td>
                                                         <td className="w-28 px-4 py-5 text-center bg-indigo-50/20 dark:bg-indigo-900/5">
                                                             <input
@@ -489,6 +877,19 @@ export default function SubCharacterList() {
                                                                 disabled={!isManageMode}
                                                             />
                                                         </td>
+                                                        {isAdmin && (
+                                                            <td className="w-24 px-4 py-5 text-center bg-rose-50/20 dark:bg-rose-900/5">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className={cn("w-4 h-4 accent-rose-500 transition-transform", isManageMode ? "cursor-pointer hover:scale-110" : "cursor-not-allowed opacity-60")}
+                                                                    checked={!!c.isPrivate}
+                                                                    onChange={(e) => {
+                                                                        set(ref(db, `${dbPath.subCharacters}/${c.id}/isPrivate`), e.target.checked);
+                                                                    }}
+                                                                    disabled={!isManageMode}
+                                                                />
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -524,7 +925,7 @@ export default function SubCharacterList() {
                                     </div>
                                 </div>
                                 <div className="flex gap-4">
-                                    <div className="bg-white/50 dark:bg-slate-700/50 px-4 py-2 rounded-2xl border border-slate-100 dark:border-slate-600">
+                                    <div className="bg-white/50 dark:bg-slate-700/50 px-4 py-2 rounded-2xl border border-slate-100/50 dark:border-slate-600">
                                         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Main</div>
                                         <div className="text-xl font-black text-slate-700 dark:text-slate-200">{Object.values(classStats).reduce((acc, curr) => acc + curr.main, 0)}</div>
                                     </div>
@@ -578,10 +979,12 @@ export default function SubCharacterList() {
                                                 {isManageMode && isAdmin && <th className="w-16 px-5 py-4 text-center">선택</th>}
                                                 <th className="w-40 px-8 py-4 text-left">닉네임</th>
                                                 <th className="w-40 px-8 py-4 text-center">직업</th>
-                                                <th className="w-32 px-8 py-4 text-center">전투력</th>
-                                                <th className="w-32 px-8 py-4 text-center">아툴 점수</th>
+                                                <th className="w-32 px-8 py-4 text-center">장비 레벨</th>
+                                                <th className="w-40 px-8 py-4 text-center">전투력</th>
+                                                <th className="w-32 px-8 py-4 text-center">오드 에너지</th>
                                                 <th className="w-40 px-8 py-4 text-center">본캐</th>
                                                 <th className="w-32 px-8 py-4 text-center">서버</th>
+                                                {isAdmin && <th className="w-24 px-4 py-4 text-center text-rose-500 bg-rose-50/50 dark:bg-rose-900/10">비공개</th>}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
@@ -606,8 +1009,11 @@ export default function SubCharacterList() {
                                                         </a>
                                                     </td>
                                                     <td className="w-40 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.class}</td>
+                                                    <td className="w-32 px-8 py-5 text-center font-bold text-slate-600 dark:text-slate-300">{c.itemLevel?.toLocaleString() || '-'}</td>
                                                     <td className="w-32 px-8 py-5 text-center font-black text-indigo-500">{c.power.toLocaleString()}</td>
-                                                    <td className="w-32 px-8 py-5 text-center font-bold text-amber-500">{(c.score || 0).toLocaleString()}</td>
+                                                    <td className="w-32 px-8 py-5 text-center">
+                                                        {renderAetherCell(c)}
+                                                    </td>
                                                     <td className="w-40 px-8 py-5 text-center font-bold text-slate-500">
                                                         <a 
                                                             href={`https://aion2tool.com/char/serverid=${SERVER_LIST.find(s => s.name === (mainMembers.find(m => m.name === c.ownerName)?.server || '아리엘'))?.id || '1006'}/${encodeURIComponent(c.ownerName)}`} 
@@ -620,6 +1026,19 @@ export default function SubCharacterList() {
                                                         </a>
                                                     </td>
                                                     <td className="w-32 px-8 py-5 text-center font-bold text-slate-400">{c.server}</td>
+                                                    {isAdmin && (
+                                                        <td className="w-24 px-4 py-5 text-center bg-rose-50/20 dark:bg-rose-900/5">
+                                                            <input
+                                                                type="checkbox"
+                                                                className={cn("w-4 h-4 accent-rose-500 transition-transform", isManageMode ? "cursor-pointer hover:scale-110" : "cursor-not-allowed opacity-60")}
+                                                                checked={!!c.isPrivate}
+                                                                onChange={(e) => {
+                                                                    set(ref(db, `${dbPath.subCharacters}/${c.id}/isPrivate`), e.target.checked);
+                                                                }}
+                                                                disabled={!isManageMode}
+                                                            />
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>

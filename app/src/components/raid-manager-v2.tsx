@@ -10,6 +10,7 @@ import { db } from '@/lib/firebase';
 import { ref, onValue, set, remove } from 'firebase/database';
 import { useAuth } from '@/context/AuthContext';
 import { useAppMode } from '@/context/ModeContext';
+import { parsePowerAndItemLevel } from '@/lib/scraper';
 
 // --- Interfaces ---
 interface RaidApplication {
@@ -17,6 +18,7 @@ interface RaidApplication {
     nickname: string;
     class: string;
     power: number;
+    itemLevel?: number;
     availability: {
         [key: string]: string[];
     };
@@ -40,6 +42,7 @@ const WEEKDAY_SLOTS = [
     { id: 'wd3', label: '오후 10:30', fullLabel: '22:30 ~ 00:30', sortKey: 2230 },
 ];
 const WEEKEND_SLOTS = [
+    { id: 'we0', label: '오전 10:00', fullLabel: '10:00 ~ 12:00', sortKey: 1000 },
     { id: 'we1', label: '오후 2:00', fullLabel: '14:00 ~ 16:00', sortKey: 1400 },
     { id: 'we2', label: '오후 4:00', fullLabel: '16:00 ~ 18:00', sortKey: 1600 },
     { id: 'we3', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
@@ -49,6 +52,7 @@ const WEEKEND_SLOTS = [
 
 // Unified Time Rows
 const TIME_ROWS = [
+    { label: '10:00 ~ 12:00', isWeekendOnly: true, wkId: 'we0', fixedOnly: true },
     { label: '오후 2:00 ~ 4:00', isWeekendOnly: true, wkId: 'we1' },
     { label: '오후 4:00 ~ 6:00', isWeekendOnly: true, wkId: 'we2' },
     { label: '오후 6:30 ~ 8:30', isWeekendOnly: false, wkId: 'we3', wdId: 'wd1' },
@@ -63,6 +67,7 @@ const SLOTS = {
         { id: 'wd3', label: '오후 10:30 ~ 12:30' }
     ],
     '주말': [
+        { id: 'we0', label: '오전 10:00 ~ 12:00' },
         { id: 'we1', label: '오후 2:00 ~ 4:00' },
         { id: 'we2', label: '오후 4:00 ~ 6:00' },
         { id: 'we3', label: '오후 6:30 ~ 8:30' },
@@ -248,7 +253,9 @@ function MemberDetailTooltip({ member, rect, fixedGroups = [], roster = [], subC
                         <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
                             <span className="text-indigo-600 dark:text-indigo-400">{member.class}</span>
                             <span className="opacity-30">•</span>
-                            <span className="font-bold text-slate-700 dark:text-slate-300">{member.power.toLocaleString()} 전투력</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">
+                                {member.power.toLocaleString()}
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -539,6 +546,78 @@ function HeatmapTooltip({ day, apps, rect, onMouseEnter, onMouseLeave, fixedGrou
     );
 }
 
+const UnappliedMembersModal = ({ isOpen, onClose, unappliedMembers }: { isOpen: boolean, onClose: () => void, unappliedMembers: any[] }) => {
+    if (!isOpen) return null;
+
+    const handleCopyMentions = () => {
+        const text = unappliedMembers.map(m => `@${m.name}`).join(', ');
+        navigator.clipboard.writeText(text);
+        alert('맨션 리스트가 복사되었습니다!');
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-300">
+                <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                    <div>
+                        <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">미신청 인원 내역</h3>
+                        <p className="text-sm text-slate-400 font-bold mt-1">이번 주 성역 신청을 진행하지 않은 인원입니다.</p>
+                    </div>
+                    <button onClick={onClose} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl transition-colors text-slate-400">
+                        <X size={24} />
+                    </button>
+                </div>
+                
+                <div className="p-8 max-h-[500px] overflow-y-auto custom-scrollbar">
+                    {unappliedMembers.length > 0 ? (
+                        <>
+                            <div className="grid grid-cols-2 gap-3 mb-6">
+                                {unappliedMembers.map((m, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50">
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] text-white", getClassColor(m.class))}>
+                                                {m.class?.[0]}
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <span className="font-black text-xs text-slate-700 dark:text-slate-200 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120px]">{m.name}</span>
+                                                <span className="text-[9px] text-slate-400 font-bold">{m.class}</span>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-[10px] font-black text-indigo-500">{m.power?.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <button 
+                                onClick={handleCopyMentions}
+                                className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 active:scale-95"
+                            >
+                                <ClipboardList size={20} />
+                                맨션용 닉네임 리스트 복사하기
+                            </button>
+                        </>
+                    ) : (
+                        <div className="py-12 flex flex-col items-center justify-center text-slate-300 gap-3">
+                            <CheckCircle size={48} className="text-emerald-500" />
+                            <p className="font-black text-slate-600 dark:text-slate-200">모든 인원이 신청을 완료했습니다!</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-8 bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800">
+                    <button 
+                        onClick={onClose}
+                        className="w-full h-14 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all active:scale-[0.98]"
+                    >
+                        닫기
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // --- Main Component ---
 
 export default function RaidManagerV2({ testMode = false }: { testMode?: boolean }) {
@@ -554,6 +633,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
     const [overviewViewMode, setOverviewViewMode] = useState<'slots' | 'list'>('slots');
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [resetConfirmText, setResetConfirmText] = useState('');
+    const [isUnappliedModalOpen, setIsUnappliedModalOpen] = useState(false);
 
     const [tooltipInfo, setTooltipInfo] = useState<{ member: RaidApplication, rect: DOMRect } | null>(null);
     const [heatmapTooltipInfo, setHeatmapTooltipInfo] = useState<{ day: string, apps: RaidApplication[], rect: DOMRect } | null>(null);
@@ -632,7 +712,16 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
         // 3. Load Applications
         const unsubscribeApps = onValue(ref(db, dbPath.raidApplications), (snapshot) => {
             const data = snapshot.val();
-            setApplications(data ? Object.values(data) as RaidApplication[] : []);
+            if (data) {
+                const list = Object.values(data) as RaidApplication[];
+                const normalized = list.map(app => {
+                    const { power, itemLevel } = parsePowerAndItemLevel(app.power, app.itemLevel);
+                    return { ...app, power, itemLevel };
+                });
+                setApplications(normalized);
+            } else {
+                setApplications([]);
+            }
         });
 
         // 4. Load Sub Characters
@@ -706,8 +795,17 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 });
             });
 
+            // If found in roster, use latest stats from roster
+            // This ensures "Refresh All" on Legion page updates Raid Manager too.
+            const stats = rosterMember ? {
+                power: rosterMember.power,
+                itemLevel: rosterMember.itemLevel,
+                class: rosterMember.class || app.class
+            } : {};
+
             return {
                 ...app,
+                ...stats,
                 fixedGroupId: group?.id || app.fixedGroupId
             };
         });
@@ -722,6 +820,12 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
             .filter(app => app.availability?.[selectedDay]?.length > 0)
             .sort((a, b) => b.power - a.power);
     }, [enrichedApplications, selectedDay]);
+
+    const unappliedMembers = useMemo(() => {
+        const normalize = (s: any) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
+        const appliedNicknames = new Set(applications.map(app => normalize(app.nickname)));
+        return roster.filter(m => !appliedNicknames.has(normalize(m.name)));
+    }, [roster, applications]);
 
     return (
         <div className="space-y-6 pb-20 animate-in fade-in duration-500">
@@ -742,13 +846,23 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                 <div className="flex items-center gap-3">
                     {isAdmin && !testMode && (
                         <>
-                            <button
-                                onClick={generateDummyData}
-                                className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black hover:bg-indigo-100 dark:hover:bg-indigo-800/30 transition-colors flex items-center gap-2"
-                            >
-                                <Zap size={14} />
-                                [DB] 더미 생성
-                            </button>
+                            {mode === 'fixed' ? (
+                                <button
+                                    onClick={() => setIsUnappliedModalOpen(true)}
+                                    className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black hover:bg-indigo-100 dark:hover:bg-indigo-800/30 transition-all flex items-center gap-2 shadow-sm active:scale-95"
+                                >
+                                    <ClipboardList size={14} />
+                                    미신청 인원 확인
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={generateDummyData}
+                                    className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black hover:bg-indigo-100 dark:hover:bg-indigo-800/30 transition-colors flex items-center gap-2"
+                                >
+                                    <Zap size={14} />
+                                    [DB] 더미 생성
+                                </button>
+                            )}
                             <button
                                 onClick={() => setIsResetModalOpen(true)}
                                 className="px-4 py-2.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-black hover:bg-rose-100 dark:hover:bg-rose-800/30 transition-colors flex items-center gap-2 border border-rose-100 dark:border-rose-900/30 shadow-sm"
@@ -822,7 +936,7 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
 
                     {/* Time Rows */}
                     <div className="space-y-2">
-                        {TIME_ROWS.map((row, rowIdx) => (
+                        {TIME_ROWS.filter(r => mode === 'fixed' || !(r as any).fixedOnly).map((row, rowIdx) => (
                             <div key={rowIdx} className="grid grid-cols-[100px_repeat(7,1fr)] gap-2">
                                 {/* Time Label */}
                                 <div className="flex items-center justify-end pr-4 text-xs font-bold text-slate-400">
@@ -1020,6 +1134,12 @@ export default function RaidManagerV2({ testMode = false }: { testMode?: boolean
                     mode={mode}
                 />
             )}
+
+            <UnappliedMembersModal 
+                isOpen={isUnappliedModalOpen}
+                onClose={() => setIsUnappliedModalOpen(false)}
+                unappliedMembers={unappliedMembers}
+            />
 
         </div>
     );

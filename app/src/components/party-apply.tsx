@@ -87,6 +87,7 @@ export default function PartyApply({
     const [existingApps, setExistingApps] = useState<any[]>([]);
     const [manualClass, setManualClass] = useState('수호성');
     const [manualPower, setManualPower] = useState('3000');
+    const [manualItemLevel, setManualItemLevel] = useState('3000');
 
     React.useEffect(() => {
         if (testMode) {
@@ -146,8 +147,19 @@ export default function PartyApply({
         });
     };
 
+    const getSlotsForDay = (isWeekend: boolean) => {
+        if (!isWeekend) return WEEKDAY_SLOTS;
+        if (mode === 'fixed') {
+            return [
+                { id: 'we0', label: '오전 10:00 ~ 12:00', startTime: '10:00', endTime: '12:00' },
+                ...WEEKEND_SLOTS
+            ];
+        }
+        return WEEKEND_SLOTS;
+    };
+
     const toggleAll = (day: string, isWeekend: boolean) => {
-        const slots = isWeekend ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+        const slots = getSlotsForDay(isWeekend);
         const allSlotIds = slots.map(s => s.id);
         const currentSelected = availability[day] || [];
         setAvailability(prev => ({
@@ -193,6 +205,7 @@ export default function PartyApply({
             nickname: trimmedName,
             class: foundMember ? foundMember.class : manualClass,
             power: foundMember ? foundMember.power : parseInt(manualPower),
+            itemLevel: foundMember ? (foundMember.itemLevel || 0) : parseInt(manualItemLevel),
             availability,
             updatedAt: new Date().toISOString()
         };
@@ -262,7 +275,7 @@ export default function PartyApply({
     };
 
     const renderDayCard = (day: string, isWeekend: boolean) => {
-        const slots = isWeekend ? WEEKEND_SLOTS : WEEKDAY_SLOTS;
+        const slots = getSlotsForDay(isWeekend);
         const selectedCount = availability[day]?.length || 0;
 
         const isSat = day === '토';

@@ -19,6 +19,7 @@ interface RaidApplication {
     nickname: string;
     class: string;
     power: number;
+    itemLevel?: number;
     availability: {
         [key: string]: string[];
     };
@@ -136,7 +137,22 @@ export default function RaidManager() {
     useEffect(() => {
         const unsubscribeApps = onValue(ref(db, dbPath.raidApplications), (snapshot) => {
             const data = snapshot.val();
-            setApplications(data ? Object.values(data) : []);
+            if (data) {
+                const list = Object.values(data) as RaidApplication[];
+                const normalized = list.map(app => {
+                    let p = Number(app.power);
+                    let il = Number(app.itemLevel) || 0;
+                    if (!il && p > 10000000) {
+                        const s = String(p);
+                        il = parseInt(s.substring(0, 4));
+                        p = parseInt(s.substring(4));
+                    }
+                    return { ...app, power: p, itemLevel: il };
+                });
+                setApplications(normalized);
+            } else {
+                setApplications([]);
+            }
             setIsLoading(false);
         });
 

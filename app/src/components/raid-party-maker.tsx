@@ -24,6 +24,7 @@ import { db } from '@/lib/firebase';
 import { ref, onValue, set, get, child } from 'firebase/database';
 import { cn, getClassColor } from '@/lib/utils';
 import { AI_PROMPT_PLACEHOLDERS } from '@/constants/ui-texts';
+import { parsePowerAndItemLevel } from '@/lib/scraper';
 
 // --- Types ---
 interface Member {
@@ -31,7 +32,6 @@ interface Member {
     name: string;
     class: string;
     power: number;
-    score?: number; // Added score
     rank: string;
     fixedGroupId?: string;
     availability?: Record<string, string[]>;
@@ -79,6 +79,7 @@ const WEEKDAY_SLOTS = [
 ];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const WEEKEND_SLOTS = [
+    { id: 'we0', label: '오전 10:00', fullLabel: '10:00 ~ 12:00', sortKey: 1000 },
     { id: 'we1', label: '오후 2:00', fullLabel: '14:00 ~ 16:00', sortKey: 1400 },
     { id: 'we2', label: '오후 4:00', fullLabel: '16:00 ~ 18:00', sortKey: 1600 },
     { id: 'we3', label: '오후 6:30', fullLabel: '18:30 ~ 20:30', sortKey: 1830 },
@@ -187,9 +188,9 @@ function PoolContainer({ id, members, fixedGroups, isReadOnly, onShowTooltip, on
                     <p className="text-sm">대기 인원이 없습니다</p>
                 </div>
             ) : (
-                members.map(m => (
+                members.map((m, idx) => (
                     <DraggableMember
-                        key={m.id}
+                        key={m?.id ? `${m.id}-pool-${idx}` : `fallback-pool-${idx}`}
                         member={m}
                         fixedGroups={fixedGroups}
                         isReadOnly={isReadOnly}
@@ -252,9 +253,9 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
                         <span className="text-xs">드래그하여 추가</span>
                     </div>
                 )}
-                {party.members.map(m => (
+                {party.members.map((m, idx) => (
                     <DraggableMember
-                        key={m.id}
+                        key={m?.id ? `${m.id}-party-${idx}` : `fallback-party-${idx}`}
                         member={m}
                         fixedGroups={fixedGroups}
                         isReadOnly={false}
@@ -267,7 +268,7 @@ function RaidPartySlot({ party, fixedGroups, index, onShowTooltip, onHideTooltip
             </div>
 
             <div className="p-2 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex justify-between text-[10px] text-slate-400 dark:text-slate-500">
-                <span>Power: {party.members.reduce((s, m) => s + m.power, 0).toLocaleString()}</span>
+                <span>Power: {party.members.reduce((s, m) => s + (m.power || 0), 0).toLocaleString()}</span>
             </div>
         </div>
     );
@@ -394,7 +395,7 @@ function MemberCard({ member, isOverlay, fixedGroup, assignedDay, assignedTime }
                 )}
                 <span className="text-[10px] font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full flex items-center gap-1">
                     {member.isSub && <RotateCcw size={10} className="text-indigo-400" />}
-                    {member.power.toLocaleString()}
+                    {(member.power || 0).toLocaleString()}
                 </span>
             </div>
         </div>
@@ -480,7 +481,7 @@ function MemberDetailTooltip({ member, rect, fixedGroups, allMembers, allSubChar
                         <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
                             <span className="text-indigo-600 dark:text-indigo-400">{member.class}</span>
                             <span className="opacity-30">•</span>
-                            <span className="font-bold text-slate-700 dark:text-slate-300">{member.power.toLocaleString()} 전투력</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{(member.power || 0).toLocaleString()} 전투력</span>
                         </div>
                     </div>
                 </div>
@@ -746,23 +747,33 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             const membersRef = ref(db, dbPath.members);
             onValue(membersRef, (memberSnap) => {
                 const memberData = memberSnap.val();
-                const rosterRaw: Member[] = memberData ? Object.values(memberData).map((m: any) => ({
-                    id: m.id, name: m.name, class: m.class || '검성',
-                    power: m.power || 0, score: m.score || 0, rank: m.rank || '',
-                    availability: m.availability
-                })) : [];
+                const rosterRaw: Member[] = memberData ? Object.entries(memberData)
+                    .filter(([key, m]: [string, any]) => m && m.name && String(m.name).trim() !== '')
+                    .map(([key, m]: [string, any]) => {
+                        const { power, itemLevel } = parsePowerAndItemLevel(m.power, m.itemLevel);
+                        return {
+                            id: m.id || key, name: m.name, class: m.class || '검성',
+                            power, rank: m.rank || '',
+                            availability: m.availability
+                        };
+                    }) : [];
 
                 // 2. Load Sub-Characters
                 const subCharsRef = ref(db, dbPath.subCharacters);
                 onValue(subCharsRef, (subSnap) => {
                     const subData = subSnap.val();
-                    const subListRaw: Member[] = subData ? Object.values(subData).map((m: any) => ({
-                        id: m.id, name: m.name, class: m.class || '검성',
-                        power: m.power || 0, score: m.score || 0, rank: '',
-                        ownerName: m.ownerName,
-                        isSub: true,
-                        raidOptIn: m.raidOptIn !== false
-                    })) : [];
+                    const subListRaw: Member[] = subData ? Object.entries(subData)
+                        .filter(([key, m]: [string, any]) => m && m.name && String(m.name).trim() !== '')
+                        .map(([key, m]: [string, any]) => {
+                        const { power, itemLevel } = parsePowerAndItemLevel(m.power, m.itemLevel);
+                        return {
+                            id: m.id || key, name: m.name, class: m.class || '검성',
+                            power, rank: '',
+                            ownerName: m.ownerName,
+                            isSub: true,
+                            raidOptIn: m.raidOptIn !== false
+                        };
+                    }) : [];
 
                     // Derive dynamic fixedGroups based on subList ownerNames
                     const groupedOwners = new Set<string>();
@@ -812,42 +823,62 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         const excluded = attData?.excludedOwners || [];
                         setExcludedOwners(excluded);
 
-                        if (mode === 'fixed') {
-                            // In fixed mode, applications are derived from roster + subList
-                            // Only include characters with power >= 2700 as requested
-                            const applicants: Member[] = [
-                                ...roster.filter(m => !excluded.includes(m.name)),
-                                ...subList.filter(m => m.ownerName && !excluded.includes(m.ownerName) && m.raidOptIn !== false)
-                            ];
-                            setApplications(applicants);
-                        } else {
-                            // In legion mode, load from raidApplications
-                            const appsRef = ref(db, dbPath.raidApplications);
-                            onValue(appsRef, (appSnap) => {
-                                const appData = appSnap.val();
-                                if (appData) {
-                                    const appList = Object.values(appData) as any[];
-                                    const applicantList: Member[] = appList.map(app => {
-                                        const rosterMember = roster.find(m => m.name === app.nickname);
-                                        const subMember = subList.find(m => m.name === app.nickname);
-                                        const foundMember = rosterMember || subMember;
-                                        return {
-                                            id: app.id || app.nickname,
-                                            name: app.nickname,
-                                            class: app.class || (foundMember?.class) || '검성',
-                                            power: app.power || (foundMember?.power) || 0,
-                                            score: foundMember?.score || 0,
-                                            rank: foundMember?.rank || '',
-                                            availability: app.availability,
-                                            fixedGroupId: foundMember?.fixedGroupId
-                                        };
-                                    });
-                                    setApplications(applicantList);
-                                } else {
-                                    setApplications([]);
+                        // 4. Load Applications (To get availability)
+                        const appsRef = ref(db, dbPath.raidApplications);
+                        onValue(appsRef, (appSnap) => {
+                            const appData = appSnap.val() || {};
+                            const appList = (Object.values(appData) || []).filter(app => app !== null && typeof app === 'object') as any[];
+                            const appMap = new Map<string, any>();
+                            
+                            const fuzzy = (s: string) => String(s || '').trim().replace(/\s/g, '').toLowerCase();
+                            appList.forEach(app => {
+                                if (app && app.nickname) {
+                                    appMap.set(fuzzy(app.nickname), app);
                                 }
-                            }, { onlyOnce: true });
-                        }
+                            });
+
+                            if (mode === 'fixed') {
+                                // In fixed mode, applications are derived from roster + subList
+                                let applicants: Member[] = [
+                                    ...roster.filter(m => !excluded.includes(m.name)),
+                                    ...subList.filter(m => m.ownerName && !excluded.includes(m.ownerName) && m.raidOptIn !== false)
+                                ];
+
+                                // Merge availability from raidApplications (Support Inheritance from Owner)
+                                applicants = applicants.map(m => {
+                                    // Try matching by character name first, then by owner name (main character)
+                                    const appInfo = appMap.get(fuzzy(m.name)) || (m.ownerName ? appMap.get(fuzzy(m.ownerName)) : null);
+                                    return {
+                                        ...m,
+                                        availability: appInfo?.availability || {}
+                                    };
+                                });
+                                setApplications(applicants);
+                            } else {
+                                // In legion mode, use raidApplications directly as the source
+                                const applicantList: Member[] = appList.map(app => {
+                                    const rosterMember = roster.find(m => fuzzy(m.name) === fuzzy(app.nickname));
+                                    const subMember = subList.find(m => fuzzy(m.name) === fuzzy(app.nickname));
+                                    const foundMember = rosterMember || subMember;
+                                    
+                                    let p = Number(app.power || (foundMember?.power) || 0);
+                                    if (p > 10000000) {
+                                        p = Number(String(p).substring(4));
+                                    }
+
+                                    return {
+                                        id: app.id || app.nickname,
+                                        name: app.nickname,
+                                        class: app.class || (foundMember?.class) || '검성',
+                                        power: p || foundMember?.power || 0,
+                                        rank: foundMember?.rank || '',
+                                        availability: app.availability,
+                                        fixedGroupId: foundMember?.fixedGroupId
+                                    };
+                                });
+                                setApplications(applicantList);
+                            }
+                        }, { onlyOnce: true });
                     }, { onlyOnce: true });
                 }, { onlyOnce: true });
             }, { onlyOnce: true });
@@ -882,16 +913,30 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
         const sessionRef = ref(db, dbPath.raidMatchingSession);
         const unsubscribe = onValue(sessionRef, (snap) => {
             const data = snap.val();
-            if (data && data.parties && Array.isArray(data.parties)) {
-                // Sanitize: Firebase might omit empty arrays
-                const sanitized = data.parties.map((p: any) => ({
-                    ...p,
-                    members: p.members || []
-                }));
+            if (data && data.parties) {
+                let partiesArray: any[] = [];
+                if (Array.isArray(data.parties)) {
+                    partiesArray = data.parties;
+                } else if (typeof data.parties === 'object') {
+                    // Handle Firebase's sequential object conversion
+                    partiesArray = Object.values(data.parties);
+                }
+
+                const sanitized = partiesArray
+                    .filter(p => p !== null)
+                    .map((p: any) => {
+                        let safeMembers: any[] = [];
+                        if (Array.isArray(p.members)) safeMembers = p.members;
+                        else if (typeof p.members === 'object' && p.members !== null) safeMembers = Object.values(p.members);
+                        return {
+                            ...p,
+                            members: safeMembers
+                                .filter(m => m !== null && typeof m === 'object')
+                                .map(m => ({ ...m, id: m.id || m.name || String(Math.random()) }))
+                        };
+                    });
                 setParties(sanitized);
                 setServerVersion(data.version || 0);
-            } else if (data && data.parties) {
-                // handle non-array if somehow corrupted but parties exist
             } else {
                 // No session data — set local defaults only, do NOT auto-write to Firebase
                 const initialParties = Array.from({ length: 4 }, (_, i) => ({
@@ -907,24 +952,38 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
 
     // 3. Derived Pool: Automatically calculate rest members from applications
     useEffect(() => {
-        if (applications.length === 0) {
-            setPool([]);
-            return;
-        }
+        if (!parties || !Array.isArray(parties)) return;
 
-        const assignedIds = new Set(parties.flatMap(p => (p.members || []).map(m => m.id)));
+        const assignedIds = new Set(
+            parties
+                .filter(p => p && p.members)
+                .flatMap(p => (p.members || []).map(m => m.id))
+        );
         const newPool = applications.filter(a => !assignedIds.has(a.id));
 
         // Apply UI Filters
         const uiFilteredPool = newPool.filter(m => {
-            const matchSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
+            if (!m) return false;
+            // Cache Buster Comment 
+            const matchSearch = (m.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
             const matchClass = filterClass === 'ALL' || m.class === filterClass;
             const matchSchedule = mode === 'fixed' || selectedDay === 'ALL' || (m.availability?.[selectedDay]?.length || 0) > 0;
             return matchSearch && matchClass && matchSchedule;
         });
 
-        uiFilteredPool.sort((a, b) => b.power - a.power);
-        setPool(uiFilteredPool);
+        // Prevent dnd-kit duplicate keys crash
+        const uniqueFilteredPool: any[] = [];
+        const seenIds = new Set<string>();
+        uiFilteredPool.forEach(m => {
+            const uid = m.id || m.name || String(Math.random());
+            if (!seenIds.has(uid)) {
+                seenIds.add(uid);
+                uniqueFilteredPool.push({ ...m, id: uid });
+            }
+        });
+
+        uniqueFilteredPool.sort((a, b) => (b.power || 0) - (a.power || 0));
+        setPool(uniqueFilteredPool);
     }, [applications, parties, searchTerm, filterClass, selectedDay]);
 
     // 4. Save Helper with Version Check (Method C)
@@ -990,12 +1049,19 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
             try {
                 const snapshot = await get(ref(db, dbPath.fixedGroups));
                 if (snapshot.exists()) {
-                    const data = snapshot.val() as FixedGroup[];
+                    const data = snapshot.val();
+                    const arrData = Array.isArray(data) ? data : Object.values(data);
+                    const safeGroups = arrData.filter(g => g !== null && typeof g === 'object');
                     // Sanitize: Firebase removes empty arrays, so ensure memberIds exists
-                    const sanitized = data.map(g => ({
-                        ...g,
-                        memberIds: g.memberIds || []
-                    }));
+                    const sanitized = safeGroups.map(g => {
+                        let safeMemberIds: string[] = [];
+                        if (Array.isArray(g.memberIds)) safeMemberIds = g.memberIds;
+                        else if (typeof g.memberIds === 'object' && g.memberIds !== null) safeMemberIds = Object.values(g.memberIds);
+                        return {
+                            ...g,
+                            memberIds: safeMemberIds.filter(id => id !== null && id !== undefined)
+                        };
+                    });
                     setFixedGroups(sanitized);
                 } else {
                     // No data exists — set local defaults only, do NOT write to Firebase
@@ -2709,7 +2775,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        {Array.from({ length: Math.ceil(parties.length / 2) }).map((_, forceIndex) => {
+                        {Array.from({ length: Math.ceil((parties?.length || 0) / 2) }).map((_, forceIndex) => {
                             const forceNumber = forceIndex + 1;
                             const party1 = parties[forceIndex * 2];
                             const party2 = parties[forceIndex * 2 + 1];
@@ -2724,6 +2790,8 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                 const currentDay = today.getDay(); // 0(Sun) ~ 6(Sat)
                                 const dayMap: Record<string, number> = { '일': 0, '월': 1, '화': 2, '수': 3, '목': 4, '금': 5, '토': 6 };
                                 const targetDay = dayMap[dayName];
+                                
+                                if (targetDay === undefined) return '';
 
                                 let diff = targetDay - currentDay;
                                 if (diff < 0) diff += 7; // Next week if passed
@@ -3570,7 +3638,7 @@ export default function RaidPartyMakerV3({ testMode = false }: { testMode?: bool
                                                         </span>
                                                     )}
                                                 </div>
-                                                <span className="text-[11px] text-slate-400">{member.class} • {member.power.toLocaleString()}</span>
+                                                <span className="text-[11px] text-slate-400">{member.class} • {(member.power || 0).toLocaleString()}</span>
                                             </div>
                                         </div>
 

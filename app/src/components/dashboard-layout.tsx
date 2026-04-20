@@ -24,7 +24,7 @@ type Tab = 'dashboard' | 'members' | 'ranking' | 'raid' | 'raid_v2' | 'raid_appl
 
 export default function DashboardLayout() {
   const [activeTab, setActiveTab] = useState<Tab>('members');
-  const { user, logout, loading, loginWithCredentials } = useAuth();
+  const { user, isAdmin, logout, loading, loginWithCredentials } = useAuth();
   const { mode } = useAppMode();
   const [isMounted, setIsMounted] = useState(false);
 
@@ -47,7 +47,7 @@ export default function DashboardLayout() {
     const unsubscribe = onValue(fixedMembersRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const names = Object.values(data).map((m: any) => m.name);
+        const names = Object.values(data).map((m: any) => m?.name || '').filter(Boolean);
         setFixedMembersNames(names.filter(n => n && n !== '사신대행이치고'));
       }
     });
@@ -185,6 +185,7 @@ export default function DashboardLayout() {
     );
   }
 
+
   return (
     <main className="min-h-screen bg-transparent text-slate-700 font-sans selection:bg-purple-200">
       <div className="relative z-10 flex h-screen overflow-hidden">
@@ -214,7 +215,7 @@ export default function DashboardLayout() {
               {mode === 'fixed' ? 'FIXED PARTY' : 'AION2'}<br />MANAGER
             </h1>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 px-1">
-              {mode === 'fixed' ? '고정파티 전용 매니저 v1.0' : '아이온2 길드 관리 매니저 v1.3'}
+              {mode === 'fixed' ? '고정파티 전용 매니저 v1.1' : '아이온2 길드 관리 매니저 v1.4'}
             </p>
           </div>
 
@@ -305,9 +306,9 @@ export default function DashboardLayout() {
             {activeTab === 'raid' && <RaidManager />}
             {activeTab === 'raid_v2' && <RaidManagerV2 />}
             {activeTab === 'party_maker' && isMounted && <RaidPartyMakerV3 testMode={debugClicks >= 5} />}
-            {activeTab === 'members' && <MemberList />}
-            {activeTab === 'ranking' && <RankingBoard />}
-            {activeTab === 'sub_characters' && <SubCharacterList />}
+            {activeTab === 'members' && <MemberList mode={mode} isAdmin={isAdmin} />}
+            {activeTab === 'ranking' && <RankingBoard mode={mode} isAdmin={isAdmin} />}
+            {activeTab === 'sub_characters' && <SubCharacterList mode={mode} isAdmin={isAdmin} />}
             <div className={activeTab === 'alerter_integration' ? 'block' : 'hidden'}>
               <AlerterIntegration showDiagnostics={debugClicks >= 5} />
             </div>
