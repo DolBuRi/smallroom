@@ -320,7 +320,34 @@ export function useAionData() {
   const addCharacter = async (char: any) => {
     if (!syncKey) return;
     const newId = Date.now().toString();
-    await set(ref(db, `users/${syncKey}/od_helper/members/${newId}`), { ...char, id: newId });
+    const acc = accounts.find(a => a.id === char.accountId);
+    const maxOde = acc?.membership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL;
+    
+    const newChar = {
+      ...char,
+      id: newId,
+      ode: maxOde,
+      odeExtra: 0,
+      expeditionBasic: 14, 
+      expeditionExtra: 0,
+      expeditionKillsBasic: 35,
+      expeditionKillsExtra: 0,
+      transcendenceBasic: 7,
+      transcendenceExtra: 0,
+      transcendenceKillsBasic: 28,
+      transcendenceKillsExtra: 0,
+      sanctuaryBasic: 4,
+      sanctuaryExtra: 0,
+      sanctuaryKillsBasic: 21,
+      sanctuaryKillsExtra: 0,
+      mission: 0,
+      corridor: 0,
+      dailyDungeon: 0,
+      awakening: 0,
+      attendance: 0,
+      lastUpdate: new Date().toISOString()
+    };
+    await set(ref(db, `users/${syncKey}/od_helper/members/${newId}`), newChar);
   };
 
   const deleteCharacter = async (id: string) => {
