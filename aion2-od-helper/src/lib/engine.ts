@@ -12,12 +12,13 @@ export const EXPEDITION_MAX_BASIC = 14;
 export const TRANSCENDENCE_MAX_BASIC = 7;
 export const SHUGO_MAX_BASIC = 14;
 export const INVASION_MAX_BASIC = 7;
-export const SANCTUARY_MAX_BASIC = 21;
+export const SANCTUARY_MAX_BASIC = 4;
 
 export const EXPEDITION_KILLS_CHAR_LIMIT = 35;
 export const EXPEDITION_KILLS_ACC_LIMIT = 63;
 export const TRANSCENDENCE_KILLS_CHAR_LIMIT = 28;
 export const TRANSCENDENCE_KILLS_ACC_LIMIT = 42;
+export const SANCTUARY_KILLS_CHAR_LIMIT = 2;
 
 /**
  * KST (UTC+9) 기준 현재 시각 반환
@@ -63,7 +64,7 @@ export const calculateCurrentState = (data: any, now: Date = getKSTNow(), isChar
   const lastUpdate = data.lastUpdate ? parseISO(data.lastUpdate) : getLatestResetTime(now);
   const newState = { ...data };
 
-  // 1. Ode Calculation (3시간마다 정해진 수치 회복)
+  // 1. Ode Calculation (3시간마다 정해진 수치 회복 - 02, 05, 08... 23시)
   if (isCharacter) {
     const maxOde = isMembership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL;
     const rechargeAmount = isMembership ? ODE_RECHARGE_3H_MEMBERSHIP : ODE_RECHARGE_3H_NORMAL;
@@ -103,11 +104,11 @@ export const calculateCurrentState = (data: any, now: Date = getKSTNow(), isChar
       if (isCharacter) {
         newState.awakening = 0;
         newState.sanctuaryCount = 0;
-        newState.expeditionKillsBasic = 0;
+        newState.expeditionKillsBasic = EXPEDITION_KILLS_CHAR_LIMIT;
         newState.expeditionKillsExtra = 0;
-        newState.transcendenceKillsBasic = 0;
+        newState.transcendenceKillsBasic = TRANSCENDENCE_KILLS_CHAR_LIMIT;
         newState.transcendenceKillsExtra = 0;
-        newState.sanctuaryKillsBasic = 0;
+        newState.sanctuaryKillsBasic = SANCTUARY_KILLS_CHAR_LIMIT;
         newState.sanctuaryKillsExtra = 0;
       } else {
         newState.expeditionCount = 0;

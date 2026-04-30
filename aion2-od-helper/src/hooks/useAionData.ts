@@ -1,12 +1,26 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { db, auth } from '@/lib/firebase';
-import { ref, onValue, update, set, remove, get } from 'firebase/database';
-import { calculateCurrentState, getTimeUntilNextRecharge, getKSTNow, ODE_MAX_NORMAL, ODE_MAX_MEMBERSHIP, ODE_EXTRA_MAX, SHUGO_MAX_BASIC, INVASION_MAX_BASIC } from '@/lib/engine';
+import { ref, onValue, update, set, remove } from 'firebase/database';
+import { 
+  calculateCurrentState, 
+  getTimeUntilNextRecharge, 
+  getKSTNow, 
+  ODE_MAX_NORMAL, 
+  ODE_MAX_MEMBERSHIP, 
+  ODE_EXTRA_MAX, 
+  SHUGO_MAX_BASIC, 
+  INVASION_MAX_BASIC,
+  EXPEDITION_MAX_BASIC,
+  TRANSCENDENCE_MAX_BASIC,
+  SANCTUARY_MAX_BASIC,
+  EXPEDITION_KILLS_CHAR_LIMIT,
+  TRANSCENDENCE_KILLS_CHAR_LIMIT,
+  SANCTUARY_KILLS_CHAR_LIMIT
+} from '@/lib/engine';
 import { signInAnonymously } from 'firebase/auth';
 
-// 6자리 무작위 키 생성기 (슈고 알리미 스타일)
 function generateShortKey() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
   let result = '';
@@ -23,15 +37,12 @@ export function useAionData() {
   const [now, setNow] = useState(getKSTNow());
   const [syncKey, setSyncKey] = useState<string>("");
 
-  // 1. 초기 키 로드 및 익명 인증
   useEffect(() => {
     const init = async () => {
-      // 익명 로그인 (보안 규칙 통과용)
       try {
         if (!auth.currentUser) await signInAnonymously(auth);
       } catch (e) { console.error('Auth failed', e); }
 
-      // 키 로드 및 레거시 정리
       let savedKey = localStorage.getItem('aion_sync_key');
       if (!savedKey || savedKey.length !== 8) {
         savedKey = generateShortKey();
@@ -42,41 +53,28 @@ export function useAionData() {
     init();
   }, []);
 
-  // 2. 타이머 틱
   useEffect(() => {
     const timer = setInterval(() => setNow(getKSTNow()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // 3. 데이터 로딩 (무한 루프 방지 위해 단순화)
   useEffect(() => {
     if (!syncKey) return;
-
     setLoading(true);
-    const accPath = `users/${syncKey}/od_helper/accounts`;
-    const charPath = `users/${syncKey}/od_helper/members`;
 
-    const unsubAcc = onValue(ref(db, accPath), (snapshot) => {
+    const unsubAcc = onValue(ref(db, `users/${syncKey}/od_helper/accounts`), (snapshot) => {
       const data = snapshot.val();
-      if (data) {
-        const list = Object.entries(data).map(([id, val]: any) => ({ id, ...val }));
-        setAccounts(list);
-        localStorage.setItem('aion_accounts', JSON.stringify(list));
-      } else {
-        setAccounts([]);
-      }
+      const list = data ? Object.entries(data).map(([id, val]: any) => ({ id, ...val })) : [];
+      setAccounts(list);
+      localStorage.setItem('aion_accounts', JSON.stringify(list));
       setLoading(false);
     });
 
-    const unsubChar = onValue(ref(db, charPath), (snapshot) => {
+    const unsubChar = onValue(ref(db, `users/${syncKey}/od_helper/members`), (snapshot) => {
       const data = snapshot.val();
-      if (data) {
-        const list = Object.entries(data).map(([id, val]: any) => ({ id, ...val }));
-        setCharacters(list);
-        localStorage.setItem('aion_characters', JSON.stringify(list));
-      } else {
-        setCharacters([]);
-      }
+      const list = data ? Object.entries(data).map(([id, val]: any) => ({ id, ...val })) : [];
+      setCharacters(list);
+      localStorage.setItem('aion_characters', JSON.stringify(list));
       setLoading(false);
     });
 
@@ -86,16 +84,17 @@ export function useAionData() {
     };
   }, [syncKey]);
 
-  // 계산 로직들...
-  const processedCharacters = characters
+  // 가공된 데이터 (Dashboard용) - useMemo로 참조 무결성 유지
+  const processedCharacters = useMemo(() => characters
     .sort((a, b) => (a.order || 0) - (b.order || 0) || a.id.localeCompare(b.id))
     .map(char => {
       const acc = accounts.find(a => a.id === char.accountId);
       return calculateCurrentState(char, now, true, acc?.membership || false);
-    });
-  const processedAccounts = accounts.map(acc => calculateCurrentState(acc, now, false));
+    }), [characters, accounts, now]);
+
+  const processedAccounts = useMemo(() => accounts.map(acc => calculateCurrentState(acc, now, false)), [accounts, now]);
   
-  const stats = {
+  const stats = useMemo(() => ({
     totalOde: processedCharacters.reduce((sum, char) => sum + (char.ode || 0), 0),
     totalOdeMax: characters.reduce((sum, char) => {
       const acc = accounts.find(a => a.id === char.accountId);
@@ -108,7 +107,7 @@ export function useAionData() {
     totalInvasion: processedAccounts.reduce((sum, acc) => sum + (acc.invasionBasic || 0), 0),
     totalInvasionMax: accounts.length * INVASION_MAX_BASIC,
     timeUntilMax: getTimeUntilNextRecharge(now)
-  };
+  }), [characters, accounts, processedCharacters, processedAccounts, now]);
 
   const updateAccount = useCallback(async (id: string, updates: any) => {
     if (!syncKey) return;
@@ -128,108 +127,49 @@ export function useAionData() {
     if (isAccount) {
       const account = accounts.find(a => a.id === id);
       if (!account) return;
-
-      if (!isUndo) {
-        if (actionType === 'shugo' && (account.shugoBasic || 0) <= 0) {
-          alert('슈고 티켓이 부족합니다.');
-          return;
-        }
-        if (actionType === 'invasion' && (account.invasionBasic || 0) <= 0) {
-          alert('침공 티켓이 부족합니다.');
-          return;
-        }
-      }
-
       if (actionType === 'shugo') updates.shugoBasic = Math.max(0, (account.shugoBasic || 0) + (isUndo ? 1 : -1));
       else if (actionType === 'invasion') updates.invasionBasic = Math.max(0, (account.invasionBasic || 0) + (isUndo ? 1 : -1));
       await updateAccount(id, updates);
     } else {
       const char = characters.find(c => c.id === id);
-      if (!char) return;
-      const account = accounts.find(a => a.id === char.accountId);
-      if (!account) return;
+      const account = accounts.find(a => a.id === char?.accountId);
+      if (!char || !account) return;
 
+      const calculatedChar = calculateCurrentState(char, getKSTNow(), true, !!account.membership);
       const odeCost = account.membership ? 80 : 40;
-      
-      // 유효성 검사 (실행 시에만)
-      if (!isUndo) {
-        // 1. 오드 체크
-        if ((char.ode || 0) < odeCost) {
-          alert(`오드가 부족합니다. (필요: ${odeCost}, 보유: ${Math.floor(char.ode || 0)})`);
-          return;
-        }
-
-        // 2. 티켓 및 처치횟수 체크
-        if (actionType === 'expedition') {
-          const hasTicket = (char.expeditionBasic || 0) > 0 || (char.expeditionExtra || 0) > 0;
-          const hasKills = (char.expeditionKillsBasic || 0) > 0 || (char.expeditionKillsExtra || 0) > 0;
-          if (!hasTicket) { alert('원정 보상 횟수가 부족하여 실행이 불가합니다.'); return; }
-          if (!hasKills) { alert('원정 처치 가능 횟수가 부족하여 실행이 불가합니다.'); return; }
-        } else if (actionType === 'transcendence') {
-          const hasTicket = (char.transcendenceBasic || 0) > 0 || (char.transcendenceExtra || 0) > 0;
-          const hasKills = (char.transcendenceKillsBasic || 0) > 0 || (char.transcendenceKillsExtra || 0) > 0;
-          if (!hasTicket) { alert('초월 보상 횟수가 부족하여 실행이 불가합니다.'); return; }
-          if (!hasKills) { alert('초월 처치 가능 횟수가 부족하여 실행이 불가합니다.'); return; }
-        } else if (actionType === 'sanctuary') {
-          const hasTicket = (char.sanctuaryBasic || 0) > 0 || (char.sanctuaryExtra || 0) > 0;
-          const hasKills = (char.sanctuaryKillsBasic || 0) > 0 || (char.sanctuaryKillsExtra || 0) > 0;
-          if (!hasTicket) { alert('성역 입장 횟수가 부족하여 실행이 불가합니다.'); return; }
-          if (!hasKills) { alert('성역 보상 횟수가 부족하여 실행이 불가합니다.'); return; }
-        }
-      }
-
-      // 실제 차감 로직
       const charUpdates: any = { lastUpdate: new Date().toISOString() };
       
+      const handleOdeDeduction = (cost: number) => {
+        let remainingCost = cost;
+        const baseOde = calculatedChar.ode || 0;
+        const extraOde = calculatedChar.odeExtra || 0;
+        if (baseOde >= remainingCost) {
+          charUpdates.ode = baseOde - remainingCost;
+          charUpdates.odeExtra = extraOde;
+        } else {
+          charUpdates.ode = 0;
+          charUpdates.odeExtra = Math.max(0, extraOde - (remainingCost - baseOde));
+        }
+      };
+
+      if (!isUndo) handleOdeDeduction(odeCost);
+      else charUpdates.ode = (calculatedChar.ode || 0) + odeCost;
+
+      const delta = isUndo ? 1 : -1;
       if (actionType === 'expedition') {
-        if (isUndo) {
-          charUpdates.ode = (char.ode || 0) + odeCost;
-          charUpdates.expeditionBasic = (char.expeditionBasic || 0) + 1; // 단순화: 기본으로 복구
-          charUpdates.expeditionKillsBasic = (char.expeditionKillsBasic || 0) + 1;
-        } else {
-          charUpdates.ode = (char.ode || 0) - odeCost;
-          if ((char.expeditionBasic || 0) > 0) charUpdates.expeditionBasic = char.expeditionBasic - 1;
-          else charUpdates.expeditionExtra = (char.expeditionExtra || 0) - 1;
-          
-          if ((char.expeditionKillsBasic || 0) > 0) charUpdates.expeditionKillsBasic = char.expeditionKillsBasic - 1;
-          else charUpdates.expeditionKillsExtra = (char.expeditionKillsExtra || 0) - 1;
-        }
+        charUpdates.expeditionBasic = (calculatedChar.expeditionBasic || 0) + delta;
+        charUpdates.expeditionKillsBasic = (calculatedChar.expeditionKillsBasic || 0) + delta;
       } else if (actionType === 'transcendence') {
-        if (isUndo) {
-          charUpdates.ode = (char.ode || 0) + odeCost;
-          charUpdates.transcendenceBasic = (char.transcendenceBasic || 0) + 1;
-          charUpdates.transcendenceKillsBasic = (char.transcendenceKillsBasic || 0) + 1;
-        } else {
-          charUpdates.ode = (char.ode || 0) - odeCost;
-          if ((char.transcendenceBasic || 0) > 0) charUpdates.transcendenceBasic = char.transcendenceBasic - 1;
-          else charUpdates.transcendenceExtra = (char.transcendenceExtra || 0) - 1;
-          
-          if ((char.transcendenceKillsBasic || 0) > 0) charUpdates.transcendenceKillsBasic = char.transcendenceKillsBasic - 1;
-          else charUpdates.transcendenceKillsExtra = (char.transcendenceKillsExtra || 0) - 1;
-        }
+        charUpdates.transcendenceBasic = (calculatedChar.transcendenceBasic || 0) + delta;
+        charUpdates.transcendenceKillsBasic = (calculatedChar.transcendenceKillsBasic || 0) + delta;
       } else if (actionType === 'sanctuary') {
-        if (isUndo) {
-          charUpdates.ode = (char.ode || 0) + odeCost;
-          charUpdates.sanctuaryBasic = (char.sanctuaryBasic || 0) + 1;
-          charUpdates.sanctuaryKillsBasic = (char.sanctuaryKillsBasic || 0) + 1;
-        } else {
-          charUpdates.ode = (char.ode || 0) - odeCost;
-          if ((char.sanctuaryBasic || 0) > 0) charUpdates.sanctuaryBasic = char.sanctuaryBasic - 1;
-          else charUpdates.sanctuaryExtra = (char.sanctuaryExtra || 0) - 1;
-          
-          if ((char.sanctuaryKillsBasic || 0) > 0) charUpdates.sanctuaryKillsBasic = char.sanctuaryKillsBasic - 1;
-          else charUpdates.sanctuaryKillsExtra = (char.sanctuaryKillsExtra || 0) - 1;
-        }
+        charUpdates.sanctuaryBasic = (calculatedChar.sanctuaryBasic || 0) + delta;
+        charUpdates.sanctuaryKillsBasic = (calculatedChar.sanctuaryKillsBasic || 0) + delta;
       }
 
       await updateCharacter(char.id, charUpdates);
-      
-      // 주간 합산 카운트 업데이트 (통계용)
-      const field = actionType === 'expedition' ? 'expeditionCount' : 
-                    actionType === 'transcendence' ? 'transcendenceCount' : 'sanctuaryCount';
-      const accUpdates: any = { lastUpdate: new Date().toISOString() };
-      accUpdates[field] = Math.max(0, (account[field] || 0) + (isUndo ? -1 : 1));
-      await updateAccount(account.id, accUpdates);
+      const field = actionType === 'expedition' ? 'expeditionCount' : actionType === 'transcendence' ? 'transcendenceCount' : 'sanctuaryCount';
+      await updateAccount(account.id, { [field]: Math.max(0, (account[field] || 0) + (isUndo ? -1 : 1)), lastUpdate: new Date().toISOString() });
     }
   };
 
@@ -239,11 +179,7 @@ export function useAionData() {
       if (acc) await updateAccount(id, { [field]: Math.max(0, (acc[field] || 0) + delta) });
     } else {
       const char = characters.find(c => c.id === id);
-      if (char) {
-        const acc = accounts.find(a => a.id === char.accountId);
-        const max = field === 'ode' ? (acc?.membership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL) : field === 'odeExtra' ? ODE_EXTRA_MAX : 9999;
-        await updateCharacter(id, { [field]: Math.min(max, Math.max(0, (char[field] || 0) + delta)), lastUpdate: new Date().toISOString() });
-      }
+      if (char) await updateCharacter(id, { [field]: Math.max(0, (char[field] || 0) + delta), lastUpdate: new Date().toISOString() });
     }
   };
 
@@ -252,32 +188,21 @@ export function useAionData() {
     const item = list.find(x => x.id === id);
     if (!item) return;
 
-    const updates: any = {};
     if (isAccount) {
-      updates[field] = !item[field];
-      await updateAccount(id, updates);
+      await updateAccount(id, { [field]: !item[field] });
     } else {
       const maxMap: Record<string, number> = {
-        mission: 5,
-        corridor: 6,
-        dailyDungeon: 1,
-        awakening: 3,
-        attendance: 1
+        mission: 5, corridor: 6, dailyDungeon: 1, awakening: 3, attendance: 1
       };
-
-      if (maxMap[field] !== undefined) {
-        const current = Number(item[field]) || 0;
-        const max = maxMap[field];
-        updates[field] = current >= max ? 0 : max;
-      } else {
-        updates[field] = !item[field];
-      }
-      await updateCharacter(id, { ...updates, lastUpdate: new Date().toISOString() });
+      const current = Number(item[field]) || 0;
+      const max = maxMap[field] || 1;
+      const newValue = current >= max ? 0 : max;
+      await updateCharacter(id, { [field]: newValue, lastUpdate: new Date().toISOString() });
     }
   };
 
   const backupData = () => {
-    const data = { accounts, characters };
+    const data = { accounts, characters, syncKey };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -292,14 +217,12 @@ export function useAionData() {
       try {
         const data = JSON.parse(e.target?.result as string);
         if (data.accounts && data.characters && syncKey) {
-          // 서버에 덮어쓰기
-          const accs = data.accounts.reduce((acc: any, val: any) => { acc[val.id] = val; return acc; }, {});
-          const chars = data.characters.reduce((acc: any, val: any) => { acc[val.id] = val; return acc; }, {});
+          const accs = data.accounts.reduce((acc: any, val: any) => ({ ...acc, [val.id]: val }), {});
+          const chars = data.characters.reduce((acc: any, val: any) => ({ ...acc, [val.id]: val }), {});
           await set(ref(db, `users/${syncKey}/od_helper/accounts`), accs);
           await set(ref(db, `users/${syncKey}/od_helper/members`), chars);
-          alert('데이터 복구가 완료되었습니다.');
         }
-      } catch (err) { alert('잘못된 백업 파일입니다.'); }
+      } catch (err) { alert('복구 실패'); }
     };
     reader.readAsText(file);
   };
@@ -307,9 +230,17 @@ export function useAionData() {
   const addAccount = async (name: string = '') => {
     if (!syncKey) return;
     const newId = Date.now().toString();
-    const newAccount = { id: newId, name, membership: false, shugoBasic: SHUGO_MAX_BASIC, shugoExtra: 0, invasionBasic: INVASION_MAX_BASIC, invasionExtra: 0, expeditionCount: 0, transcendenceCount: 0, sanctuaryCount: 0, lastUpdate: new Date().toISOString() };
-    await set(ref(db, `users/${syncKey}/od_helper/accounts/${newId}`), newAccount);
-    return newId;
+    const newAcc = {
+      name,
+      membership: false,
+      shugoBasic: SHUGO_MAX_BASIC,
+      invasionBasic: INVASION_MAX_BASIC,
+      expeditionCount: 0,
+      transcendenceCount: 0,
+      sanctuaryCount: 0,
+      lastUpdate: new Date().toISOString()
+    };
+    await set(ref(db, `users/${syncKey}/od_helper/accounts/${newId}`), newAcc);
   };
 
   const deleteAccount = async (id: string) => {
@@ -317,28 +248,31 @@ export function useAionData() {
     await remove(ref(db, `users/${syncKey}/od_helper/accounts/${id}`));
   };
 
-  const addCharacter = async (char: any) => {
+  const addCharacter = async (data: any) => {
     if (!syncKey) return;
     const newId = Date.now().toString();
-    const acc = accounts.find(a => a.id === char.accountId);
-    const maxOde = acc?.membership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL;
     
+    // 현재 캐릭터들 중 가장 높은 order 값 찾기
+    const maxOrder = characters.length > 0 
+      ? Math.max(...characters.map(c => c.order || 0)) 
+      : -1;
+
     const newChar = {
-      ...char,
-      id: newId,
-      ode: maxOde,
+      ...data,
+      order: maxOrder + 1, // 맨 뒤에 추가
+      ode: 0,
       odeExtra: 0,
-      expeditionBasic: 14, 
+      expeditionBasic: EXPEDITION_MAX_BASIC,
       expeditionExtra: 0,
-      expeditionKillsBasic: 35,
+      expeditionKillsBasic: EXPEDITION_KILLS_CHAR_LIMIT,
       expeditionKillsExtra: 0,
-      transcendenceBasic: 7,
+      transcendenceBasic: TRANSCENDENCE_MAX_BASIC,
       transcendenceExtra: 0,
-      transcendenceKillsBasic: 28,
+      transcendenceKillsBasic: TRANSCENDENCE_KILLS_CHAR_LIMIT,
       transcendenceKillsExtra: 0,
-      sanctuaryBasic: 4,
+      sanctuaryBasic: SANCTUARY_MAX_BASIC,
       sanctuaryExtra: 0,
-      sanctuaryKillsBasic: 21,
+      sanctuaryKillsBasic: SANCTUARY_KILLS_CHAR_LIMIT,
       sanctuaryKillsExtra: 0,
       mission: 0,
       corridor: 0,
@@ -358,26 +292,22 @@ export function useAionData() {
   const reorderCharacters = async (newOrder: any[]) => {
     if (!syncKey) return;
     const updates: any = {};
-    newOrder.forEach((char, index) => {
-      updates[`${char.id}/order`] = index;
-    });
+    newOrder.forEach((char, index) => updates[`${char.id}/order`] = index);
     await update(ref(db, `users/${syncKey}/od_helper/members`), updates);
   };
 
   const updateSyncKey = (key: string | null) => {
-    if (key) {
-      const trimmed = key.trim().toUpperCase();
-      localStorage.setItem('aion_sync_key', trimmed);
-      setSyncKey(trimmed);
-    } else {
-      const newKey = generateShortKey();
-      localStorage.setItem('aion_sync_key', newKey);
-      setSyncKey(newKey);
-    }
+    const newKey = key ? key.trim().toUpperCase() : generateShortKey();
+    localStorage.setItem('aion_sync_key', newKey);
+    setSyncKey(newKey);
   };
 
   return {
-    accounts: processedAccounts, characters: processedCharacters, loading, stats,
+    accounts: processedAccounts, 
+    rawAccounts: accounts,
+    characters: processedCharacters, 
+    rawCharacters: characters,
+    loading, stats,
     executeAction, manualAdjust, toggleCheck, backupData, restoreData,
     addAccount, updateAccount, deleteAccount, addCharacter, updateCharacter, deleteCharacter, reorderCharacters,
     updateSyncKey, syncKey

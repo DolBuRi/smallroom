@@ -32,6 +32,9 @@ export default function Dashboard() {
     });
   };
 
+  const ode400Plus = characters.filter(c => (c.ode || 0) >= 400).length;
+  const ode720Plus = characters.filter(c => (c.ode || 0) >= 720).length;
+
   return (
     <div className="container-custom py-8">
       {/* Header Section */}
@@ -104,7 +107,7 @@ export default function Dashboard() {
         <div className="md:col-span-1">
           <SummaryCard title="기본오드 400+">
             <div className="flex items-baseline gap-1 mt-2">
-              <span className="text-4xl font-black text-blue-500 tracking-tighter">{accounts.length}</span>
+              <span className="text-4xl font-black text-blue-500 tracking-tighter">{ode400Plus}</span>
               <span className="text-[12px] text-slate-400 dark:text-slate-500 font-bold">캐릭터 수</span>
             </div>
           </SummaryCard>
@@ -113,7 +116,7 @@ export default function Dashboard() {
         <div className="md:col-span-1">
           <SummaryCard title="기본오드 720+">
             <div className="flex items-baseline gap-1 mt-2">
-              <span className="text-4xl font-black text-red-500 tracking-tighter">0</span>
+              <span className="text-4xl font-black text-red-500 tracking-tighter">{ode720Plus}</span>
               <span className="text-[12px] text-slate-400 dark:text-slate-500 font-bold">캐릭터 수</span>
             </div>
           </SummaryCard>
@@ -557,6 +560,7 @@ function CharacterRow({ char, account, onManual, charHandleAction, onToggle }: a
                       onAdjust={(d) => onManual(char.id, 'sanctuaryKillsExtra', d)}
                       color="text-blue-500 dark:text-blue-400"
                     />
+                    <span className="text-slate-300 dark:text-neutral-600 font-bold tracking-tighter"> / 2</span>
                   </div>
               </td>
               <td className="px-6 py-3 text-center">
