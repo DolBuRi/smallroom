@@ -11,7 +11,7 @@ const navItems = [
   { name: '대시보드', href: '/dashboard' },
   { name: '계정 관리', href: '/accounts' },
   { name: '캐릭터 관리', href: '/characters' },
-  { name: '앱 다운로드', href: '#', isExternal: true },
+  { name: '앱 다운로드', href: 'https://github.com/DolBuRi/smallroom/releases/tag/v0.2.0', isExternal: true },
 ];
 
 export default function Navbar() {
@@ -22,10 +22,10 @@ export default function Navbar() {
 
   useEffect(() => setMounted(true), []);
 
-  const handleExternalClick = (e: React.MouseEvent, name: string) => {
+  const handleExternalClick = (e: React.MouseEvent, name: string, href: string) => {
     if (name === '앱 다운로드') {
       e.preventDefault();
-      alert('준비중입니다');
+      window.open(href, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -46,7 +46,7 @@ export default function Navbar() {
               <Link
                 key={item.name}
                 href={item.href}
-                onClick={(e) => item.isExternal && handleExternalClick(e, item.name)}
+                onClick={(e) => item.isExternal && handleExternalClick(e, item.name, item.href)}
                 className={cn(
                   "px-4 py-2 text-[13px] font-semibold transition-all relative",
                   pathname === item.href
@@ -90,7 +90,7 @@ export default function Navbar() {
               href={item.href}
               onClick={(e) => {
                 if (item.isExternal) {
-                  handleExternalClick(e, item.name);
+                  handleExternalClick(e, item.name, item.href);
                 } else {
                   setIsOpen(false);
                 }
