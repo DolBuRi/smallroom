@@ -10,9 +10,11 @@ const KEY_MAP: Record<string, string> = {
   '작': '작', 'wkr': '작',
   '은': '은', 'dms': '은',
   '방': '방', 'qkd': '방', 'qk': '방',
+  '지': '지', 'wl': '지',
+  '인': '인', 'dls': '인',
 };
 
-const TARGET_SEQUENCE = ['작', '은', '방'];
+const VALID_SEQUENCES = ['작은방', '지인방'];
 
 export default function AccessGate({ children }: { children: React.ReactNode }) {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
@@ -56,17 +58,23 @@ export default function AccessGate({ children }: { children: React.ReactNode }) 
 
       if (isAuthorized !== false || isCompleted) return;
 
-      const expectedChar = TARGET_SEQUENCE[currentStep];
+      // 현재 단계에서 가능한 모든 글자 후보 추출
+      const validNextChars = VALID_SEQUENCES
+        .filter(seq => seq.startsWith(typedChars.join('')))
+        .map(seq => seq[currentStep])
+        .filter(Boolean);
       
       let matched = false;
       for (const [input, char] of Object.entries(KEY_MAP)) {
-        if (char === expectedChar && inputBuffer.current.endsWith(input.toLowerCase())) {
-          setTypedChars(prev => [...prev, char]);
+        if (validNextChars.includes(char) && inputBuffer.current.endsWith(input.toLowerCase())) {
+          const newTypedChars = [...typedChars, char];
+          setTypedChars(newTypedChars);
           setCurrentStep(prev => prev + 1);
           inputBuffer.current = ''; 
           matched = true;
           
-          if (currentStep === TARGET_SEQUENCE.length - 1) {
+          // 어떤 시퀀스라도 완성되면 종료
+          if (VALID_SEQUENCES.includes(newTypedChars.join(''))) {
             setIsCompleted(true);
           }
           break;
@@ -80,7 +88,7 @@ export default function AccessGate({ children }: { children: React.ReactNode }) 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAuthorized, currentStep, isCompleted]);
+  }, [isAuthorized, currentStep, isCompleted, typedChars]);
 
   const handleAuthorize = () => {
     localStorage.setItem(ACCESS_KEY, 'true');

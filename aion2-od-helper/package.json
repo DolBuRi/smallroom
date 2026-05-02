@@ -8,7 +8,24 @@
     "start": "next start",
     "lint": "eslint",
     "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:start": "electron ."
+    "electron:start": "electron .",
+    "electron:build": "npm run build && npx electron-builder"
+  },
+  "build": {
+    "appId": "com.aion2.hud",
+    "productName": "Aion2_HUD",
+    "files": [
+      "electron/**/*",
+      "out/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "public/icon.png"
+    },
+    "directories": {
+      "output": "dist"
+    }
   },
   "main": "electron/main.js",
   "dependencies": {

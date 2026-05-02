@@ -6,7 +6,7 @@ import Footer from "./Footer";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isHud = pathname === '/hud';
+  const isHud = pathname?.includes('/hud');
 
   if (isHud) {
     return (

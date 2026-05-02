@@ -1,5 +1,5 @@
 {
-  "status": "UNLOCKED",
-  "reason": "Temporary unlock for authorized deployment as requested by user.",
-  "last_updated": "2026-04-30T11:40:00Z"
+  "status": "LOCKED",
+  "reason": "AI deployment is strictly prohibited without explicit text approval and manual unlock.",
+  "last_updated": "2026-04-30T11:42:00Z"
 }

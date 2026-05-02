@@ -1,8 +1,17 @@
-const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer, protocol, globalShortcut } = require('electron');
+app.disableHardwareAcceleration(); 
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('disable-gpu'); 
+app.commandLine.appendSwitch('disable-software-rasterizer');
 const path = require('path');
 const https = require('https');
 const fs = require('fs');
+const http = require('http'); // HTTP 서버 모듈 추가
+
+app.name = 'aion2-od-helper';
+app.on('ready', () => {
+  console.log('[Main] UserData Path:', app.getPath('userData'));
+});
 
 const { initializeApp } = require('firebase/app');
 const { getAuth, signInAnonymously } = require('firebase/auth');
@@ -24,12 +33,23 @@ const db = getDatabase(firebaseApp);
 const auth = getAuth(firebaseApp);
 
 signInAnonymously(auth)
-  .then(() => console.log('Firebase Anonymous Auth Success'))
+  .then(() => {
+    console.log('Firebase Anonymous Auth Success');
+    isAuthReady = true;
+    // 대기 중인 구독 요청 처리
+    if (pendingSubscriptions.length > 0) {
+      console.log(`[Main] Processing ${pendingSubscriptions.length} pending subscriptions...`);
+      pendingSubscriptions.forEach(path => doSubscribe(path));
+      pendingSubscriptions = [];
+    }
+  })
   .catch((err) => console.error('Firebase Auth Error:', err));
 
 let hudWindow = null;
 let configPath = '';
 const activeListeners = new Map();
+let isAuthReady = false;
+let pendingSubscriptions = [];
 
 function getSettingsPath() {
   if (!configPath) configPath = path.join(app.getPath('userData'), 'window-state.json');
@@ -69,6 +89,7 @@ function createHUD() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -76,7 +97,42 @@ function createHUD() {
   if (!app.isPackaged) {
     hudWindow.loadURL('http://localhost:3000/hud');
   } else {
-    hudWindow.loadFile(path.join(__dirname, '../.next/server/app/hud.html'));
+    // 내장 웹 서버를 통해 로드 (가장 확실한 해결책)
+    const server = http.createServer((req, res) => {
+      let filePath = path.join(app.getAppPath(), 'out', req.url === '/' ? 'index.html' : req.url);
+      
+      // trailingSlash 대응: 폴더 경로면 index.html 찾기
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(filePath, 'index.html');
+      }
+
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          res.writeHead(404);
+          res.end(JSON.stringify(err));
+          return;
+        }
+        
+        // 간단한 Content-Type 설정
+        const ext = path.extname(filePath);
+        const mimeTypes = {
+          '.html': 'text/html',
+          '.js': 'text/javascript',
+          '.css': 'text/css',
+          '.json': 'application/json',
+          '.png': 'image/png',
+          '.jpg': 'image/jpg',
+          '.svg': 'image/svg+xml'
+        };
+        res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
+        res.end(data);
+      });
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      hudWindow.loadURL(`http://127.0.0.1:${port}/hud/`);
+    });
   }
 
   hudWindow.on('move', saveWindowState);
@@ -91,39 +147,6 @@ function createHUD() {
     isSideOpen = state.view !== 'hud';
     isHudLocked = state.isLocked;
   });
-
-  // [NEW] 메인 프로세스 전역 마우스 추적 (렌더러 지연 우회)
-  setInterval(() => {
-    if (!hudWindow || hudWindow.isDestroyed()) return;
-    
-    const mousePoint = screen.getCursorScreenPoint();
-    const windowBounds = hudWindow.getBounds();
-    
-    const x = mousePoint.x - windowBounds.x;
-    const y = mousePoint.y - windowBounds.y;
-
-    // HUD 영역 감지
-    const isOverHudArea = x >= 0 && x <= 312 && y >= 0 && y <= 900;
-    let isClickableInHud = false;
-    
-    if (isOverHudArea) {
-      if (isHudLocked) {
-        // 잠금 상태면 상단 헤더(42px)만 클릭 가능
-        isClickableInHud = y <= 42;
-      } else {
-        isClickableInHud = true;
-      }
-    }
-
-    // 설정창 영역 (폭 280px, x좌표 316px부터 시작)
-    const isOverSide = isSideOpen && x >= 316 && x <= 316 + 280 && y >= 0 && y <= 900;
-
-    if (isClickableInHud || isOverSide) {
-      hudWindow.setIgnoreMouseEvents(false);
-    } else {
-      hudWindow.setIgnoreMouseEvents(true, { forward: true });
-    }
-  }, 50); // 50ms 간격으로 매우 빠르게 체크
 }
 
 // --- IPC Handlers ---
@@ -131,15 +154,12 @@ function createHUD() {
 // [FIX] 경로 유효성 검사 함수
 function isValidFirebasePath(path) {
   if (!path || typeof path !== 'string') return false;
-  // Firebase 금지 문자: . # $ [ ]
-  return !/[.#$[\]]/.test(path);
+  const isInvalid = /[.#$[\]]/.test(path);
+  if (isInvalid) console.warn(`[Main] Invalid Firebase path detected: ${path}`);
+  return !isInvalid;
 }
 
-ipcMain.on('subscribe-firebase-data', (event, dbPath) => {
-  if (!isValidFirebasePath(dbPath)) {
-    console.error('Invalid Firebase Path Blocked:', dbPath);
-    return;
-  }
+function doSubscribe(dbPath) {
   if (activeListeners.has(dbPath)) {
     get(ref(db, dbPath)).then(snapshot => {
       if (hudWindow) hudWindow.webContents.send('firebase-data-update', { path: dbPath, data: snapshot.val() });
@@ -148,15 +168,34 @@ ipcMain.on('subscribe-firebase-data', (event, dbPath) => {
   }
   
   const dbRef = ref(db, dbPath);
+  console.log(`[Main] Subscribing to: ${dbPath}`);
   const unsubscribe = onValue(dbRef, (snapshot) => {
     if (hudWindow) {
       hudWindow.webContents.send('firebase-data-update', { path: dbPath, data: snapshot.val() });
     }
   }, (error) => {
-    console.error(`Firebase Sub Error (${dbPath}):`, error);
+    console.error(`Firebase Sub Error (${dbPath}):`, error.message);
+    if (error.message.includes('PERMISSION_DENIED')) {
+      activeListeners.delete(dbPath);
+    }
   });
 
   activeListeners.set(dbPath, unsubscribe);
+}
+
+ipcMain.on('subscribe-firebase-data', (event, dbPath) => {
+  if (!isValidFirebasePath(dbPath)) {
+    console.error('Invalid Firebase Path Blocked:', dbPath);
+    return;
+  }
+  
+  if (!isAuthReady) {
+    console.log(`[Main] Auth not ready, queuing: ${dbPath}`);
+    if (!pendingSubscriptions.includes(dbPath)) pendingSubscriptions.push(dbPath);
+    return;
+  }
+  
+  doSubscribe(dbPath);
 });
 
 ipcMain.on('unsubscribe-firebase-data', (event, dbPath) => {
@@ -197,8 +236,57 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   if (hudWindow) hudWindow.setIgnoreMouseEvents(ignore, options || {});
 });
 
+ipcMain.on('resize-window', (event, width, height) => {
+  if (hudWindow) {
+    hudWindow.setSize(width, height);
+    // 중앙 정렬이 필요하다면 추가할 수 있으나 보통은 크기만 조절함
+  }
+});
+
 ipcMain.handle('close-window', () => {
   if (hudWindow) { saveWindowState(); hudWindow.close(); }
+});
+
+ipcMain.on('log-from-renderer', (event, level, ...args) => {
+  const prefix = `[Renderer-${level.toUpperCase()}]`;
+  if (level === 'error') console.error(prefix, ...args);
+  else if (level === 'warn') console.warn(prefix, ...args);
+  else console.log(prefix, ...args);
+});
+
+// [NEW] 설정 파일 저장/불러오기 (localStorage 대체용)
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'config.json');
+}
+
+ipcMain.handle('load-config', async () => {
+  try {
+    const p = getConfigPath();
+    console.log(`[Main] Loading config from: ${p}`);
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      console.log(`[Main] Config loaded successfully (syncKey: ${data.syncKey ? 'YES' : 'NO'})`);
+      return { ok: true, data };
+    }
+    console.log(`[Main] Config file not found, returning empty`);
+    return { ok: true, data: {} };
+  } catch (e) { 
+    console.error(`[Main] Config load error: ${e.message}`);
+    return { ok: false, error: e.message }; 
+  }
+});
+
+ipcMain.handle('save-config', async (event, config) => {
+  try {
+    const p = getConfigPath();
+    console.log(`[Main] Saving config to: ${p}`);
+    fs.writeFileSync(p, JSON.stringify(config, null, 2));
+    console.log(`[Main] Config saved successfully (syncKey: ${config.syncKey ? 'YES' : 'NO'})`);
+    return { ok: true };
+  } catch (e) { 
+    console.error(`[Main] Config save error: ${e.message}`);
+    return { ok: false, error: e.message }; 
+  }
 });
 
 ipcMain.handle('get-server-time', async () => {
@@ -282,5 +370,81 @@ ipcMain.handle('get-desktop-sources', async () => {
   return sources.map(s => ({ id: s.id, name: s.name }));
 });
 
-app.whenReady().then(createHUD);
+// [NEW] 단축키 등록 관리 함수
+function registerAppShortcuts(shortcuts) {
+  // 기존 단축키 모두 해제
+  globalShortcut.unregisterAll();
+  
+  const { 
+    toggleHud = 'Shift+`', 
+    toggleCompact = 'Shift+1',
+    toggleDetails = 'Shift+2'
+  } = shortcuts || {};
+
+  // 1. HUD 토글
+  try {
+    const success = globalShortcut.register(toggleHud, () => {
+      if (!hudWindow || hudWindow.isDestroyed()) return;
+      if (hudWindow.isVisible()) {
+        hudWindow.hide();
+      } else {
+        hudWindow.show();
+        hudWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+      }
+    });
+    console.log(`[Hotkey] Toggle HUD (${toggleHud}) registration: ${success ? 'SUCCESS' : 'FAILED'}`);
+  } catch (e) {
+    console.error(`[Hotkey] Error registering toggleHud: ${e.message}`);
+  }
+
+  // 2. 압축 모드 토글
+  try {
+    const success = globalShortcut.register(toggleCompact, () => {
+      if (!hudWindow || hudWindow.isDestroyed()) return;
+      hudWindow.webContents.send('toggle-compact-mode');
+    });
+    console.log(`[Hotkey] Toggle Compact (${toggleCompact}) registration: ${success ? 'SUCCESS' : 'FAILED'}`);
+  } catch (e) {
+    console.error(`[Hotkey] Error registering toggleCompact: ${e.message}`);
+  }
+
+  // 3. 상세 정보 토글
+  try {
+    const success = globalShortcut.register(toggleDetails, () => {
+      if (!hudWindow || hudWindow.isDestroyed()) return;
+      hudWindow.webContents.send('toggle-details-view');
+    });
+    console.log(`[Hotkey] Toggle Details (${toggleDetails}) registration: ${success ? 'SUCCESS' : 'FAILED'}`);
+  } catch (e) {
+    console.error(`[Hotkey] Error registering toggleDetails: ${e.message}`);
+  }
+}
+
+ipcMain.handle('update-hotkeys', async (event, shortcuts) => {
+  registerAppShortcuts(shortcuts);
+  return { ok: true };
+});
+
+app.whenReady().then(async () => {
+  createHUD();
+  
+  // 창이 로드된 후 단축키 재등록 (동기화 보장)
+  hudWindow.webContents.on('did-finish-load', () => {
+    try {
+      const p = getConfigPath();
+      if (fs.existsSync(p)) {
+        const config = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (config.hotkeys) {
+          registerAppShortcuts(config.hotkeys);
+          return;
+        }
+      }
+    } catch (e) {}
+    registerAppShortcuts();
+  });
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

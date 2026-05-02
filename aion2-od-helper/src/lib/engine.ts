@@ -21,57 +21,77 @@ export const TRANSCENDENCE_KILLS_ACC_LIMIT = 42;
 export const SANCTUARY_KILLS_CHAR_LIMIT = 2;
 
 /**
- * KST (UTC+9) 기준 현재 시각 반환
+ * KST (UTC+9) 기준 시각 계산을 위한 헬퍼
+ * 시스템 타임존에 상관없이 항상 일정한 KST 벽시계 시간을 반환합니다.
  */
 export const getKSTNow = () => {
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utc + (3600000 * 9));
+  return new Date(now.getTime() + (9 * 60 * 60 * 1000));
 };
 
 export const getLatestResetTime = (date: Date = getKSTNow()) => {
-  const resetToday = addHours(startOfDay(date), RESET_HOUR);
-  if (isAfter(date, resetToday)) return resetToday;
-  return addHours(startOfDay(addDays(date, -1)), RESET_HOUR);
+  const d = new Date(date.getTime());
+  d.setUTCHours(RESET_HOUR, 0, 0, 0);
+  if (date.getTime() >= d.getTime()) return d;
+  return new Date(d.getTime() - 24 * 3600000);
 };
 
 /**
  * 특정 시각(02, 05, 08... 23) 게이트를 몇 번 지났는지 계산
+ * 모든 계산은 UTC 메서드를 사용하여 타임존 독립적으로 수행합니다.
  */
 const countGateCrossed = (start: Date, end: Date, interval: number, offset: number) => {
+  if (start.getTime() > end.getTime()) return 0;
+
   let count = 0;
-  let current = new Date(start);
-  current.setMinutes(0, 0, 0); // 분/초 초기화
+  // 시작 시각을 기준으로 첫 번째 게이트 시각 찾기
+  let current = new Date(start.getTime());
+  current.setUTCMinutes(0, 0, 0);
 
-  // 다음 게이트 시각 찾기
-  let nextGate = new Date(current);
-  const currentHour = nextGate.getHours();
+  const currentHour = current.getUTCHours();
+  // 다음 게이트까지 남은 시간 계산
   const hoursToNext = (interval - ((currentHour - offset + 24) % interval)) % interval;
-  nextGate = addHours(nextGate, hoursToNext === 0 && !isAfter(nextGate, start) ? interval : hoursToNext);
-
-  let safety = 0;
-  while (!isAfter(nextGate, end) && safety < 1000) {
-    if (isAfter(nextGate, start)) {
-      count++;
-    }
-    nextGate = addHours(nextGate, interval);
-    safety++;
+  
+  let nextGateTime = current.getTime() + (hoursToNext === 0 ? interval : hoursToNext) * 3600000;
+  
+  // 만약 계산된 nextGate가 start와 같거나 이전이면 한 주기 뒤로
+  if (nextGateTime <= start.getTime()) {
+    nextGateTime += interval * 3600000;
   }
+
+  while (nextGateTime <= end.getTime()) {
+    count++;
+    nextGateTime += interval * 3600000;
+  }
+  
   return count;
 };
 
-export const calculateCurrentState = (data: any, now: Date = getKSTNow(), isCharacter: boolean = false, isMembership: boolean = false) => {
-  const lastUpdate = data.lastUpdate ? parseISO(data.lastUpdate) : getLatestResetTime(now);
+export const calculateCurrentState = (data: any, now: Date = new Date(), isCharacter: boolean = false, isMembership: boolean = false) => {
+  // DB의 lastUpdate(UTC ISO)를 그대로 사용 (Date 객체로 변환)
+  const lastUpdate = data.lastUpdate 
+    ? new Date(data.lastUpdate)
+    : new Date(getLatestResetTime(now).getTime() - (9 * 60 * 60 * 1000));
+  
   const newState = { ...data };
 
-  // 1. Ode Calculation (3시간마다 정해진 수치 회복 - 02, 05, 08... 23시)
+  // 1. Ode Calculation (3시간마다 정해진 수치 회복 - KST 02, 05, 08... 23시)
   if (isCharacter) {
     const maxOde = isMembership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL;
     const rechargeAmount = isMembership ? ODE_RECHARGE_3H_MEMBERSHIP : ODE_RECHARGE_3H_NORMAL;
     
-    // 회복 게이트: 02, 05, 08, 11, 14, 17, 20, 23 (간격 3, 오프셋 2)
-    const gatesPassed = countGateCrossed(lastUpdate, now, 3, 2);
-    newState.ode = Math.min(maxOde, (data.ode || 0) + (gatesPassed * rechargeAmount));
+    // 회복 게이트 판정을 위해 시간을 KST로 변환하여 countGateCrossed 호출
+    const kstLastUpdate = new Date(lastUpdate.getTime() + (9 * 60 * 60 * 1000));
+    const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+
+    const gatesPassed = countGateCrossed(kstLastUpdate, kstNow, 3, 2);
+    const currentOde = data.ode || 0;
+
+    if (currentOde < maxOde) {
+      newState.ode = Math.min(maxOde, currentOde + (gatesPassed * rechargeAmount));
+    } else {
+      newState.ode = currentOde;
+    }
   }
 
   // 2. Tickets Calculation
@@ -130,27 +150,26 @@ export const calculateCurrentState = (data: any, now: Date = getKSTNow(), isChar
 };
 
 const getWednesdayReset = (date: Date) => {
-  const d = new Date(date);
-  const day = d.getDay(); // 0(Sun) - 6(Sat)
-  // 이번 주 수요일(3)로부터 며칠 전인지 계산
+  const d = new Date(date.getTime());
+  const day = d.getUTCDay(); // 0(Sun) - 6(Sat)
   const diff = (day < 3) ? (day + 4) : (day - 3);
-  d.setDate(d.getDate() - diff);
-  d.setHours(5, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - diff);
+  d.setUTCHours(5, 0, 0, 0);
   return d;
 };
 
 const getWednesday22Reset = (date: Date) => {
   const d = getWednesdayReset(date);
-  d.setHours(22, 0, 0, 0);
+  d.setUTCHours(22, 0, 0, 0);
   return d;
 };
 
 const getSaturday22Reset = (date: Date) => {
-  const d = new Date(date);
-  const day = d.getDay();
+  const d = new Date(date.getTime());
+  const day = d.getUTCDay();
   const diff = (day < 6) ? (day + 1) : (day - 6);
-  d.setDate(d.getDate() - diff);
-  d.setHours(22, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - diff);
+  d.setUTCHours(22, 0, 0, 0);
   return d;
 };
 
@@ -166,14 +185,14 @@ export const countWeeklyWednesdayGates = (start: Date, end: Date) => {
   
   // 기준점: start보다 이후이고 end보다 이전인 첫 수요일 찾기
   let nextGate = thisWed;
-  if (!isAfter(nextGate, start)) {
-    nextGate = addDays(nextGate, 7);
+  if (nextGate.getTime() <= start.getTime()) {
+    nextGate = new Date(nextGate.getTime() + 7 * 24 * 3600000);
   }
 
   let safety = 0;
-  while (!isAfter(nextGate, end) && safety < 100) {
+  while (nextGate.getTime() <= end.getTime() && safety < 100) {
     count++;
-    nextGate = addDays(nextGate, 7);
+    nextGate = new Date(nextGate.getTime() + 7 * 24 * 3600000);
     safety++;
   }
   return count;
@@ -186,15 +205,15 @@ export const getTimeUntilNextRecharge = (now: Date = getKSTNow()) => {
   const interval = 3;
   const offset = 2; // 02, 05, 08...
   
-  const d = new Date(now);
-  d.setMinutes(0, 0, 0);
+  const d = new Date(now.getTime());
+  d.setUTCMinutes(0, 0, 0);
   
-  const currentHour = d.getHours();
+  const currentHour = d.getUTCHours();
   const hoursSinceLastGate = (currentHour - offset + 24) % interval;
   const hoursToNext = interval - hoursSinceLastGate;
   
-  const nextGate = addHours(d, hoursToNext);
-  const diffMs = nextGate.getTime() - now.getTime();
+  const nextGateTime = d.getTime() + hoursToNext * 3600000;
+  const diffMs = nextGateTime - now.getTime();
   const totalSeconds = Math.max(0, Math.floor(diffMs / 1000));
   
   const h = Math.floor(totalSeconds / 3600);

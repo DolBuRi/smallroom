@@ -418,9 +418,9 @@ function CharacterRow({ char, account, onManual, charHandleAction, onToggle }: a
             <GripVertical size={16} />
           </div>
           <div className={cn("w-2.5 h-2.5 rounded-full shrink-0 shadow-sm", char.color || 'bg-indigo-400')} />
-          <div>
-            <div className="text-[14px] font-black text-slate-900 dark:text-slate-100 leading-tight tracking-tight">{char.name}</div>
-            <div className="text-[11px] text-slate-400 dark:text-neutral-500 font-black leading-tight mt-0.5 uppercase">{char.className}</div>
+          <div className="min-w-0">
+            <div className="text-[14px] font-black text-slate-900 dark:text-slate-100 leading-tight tracking-tight truncate whitespace-nowrap">{char.name}</div>
+            <div className="text-[11px] text-slate-400 dark:text-neutral-500 font-black leading-tight mt-0.5 uppercase truncate">{char.className}</div>
           </div>
         </div>
       </td>
