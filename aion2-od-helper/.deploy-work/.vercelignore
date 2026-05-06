@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+.next
+.electron-builder-debug.yml
+builder-debug.yml
+*.exe
+*.zip
+*.dmg
+*.blockmap
