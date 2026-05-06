@@ -68,21 +68,22 @@ const countGateCrossed = (start: Date, end: Date, interval: number, offset: numb
 };
 
 export const calculateCurrentState = (data: any, now: Date = new Date(), isCharacter: boolean = false, isMembership: boolean = false) => {
-  // DB의 lastUpdate(UTC ISO)를 그대로 사용 (Date 객체로 변환)
+  // DB의 lastUpdate(UTC ISO)를 그대로 사용
   const lastUpdate = data.lastUpdate 
     ? new Date(data.lastUpdate)
     : new Date(getLatestResetTime(now).getTime() - (9 * 60 * 60 * 1000));
   
   const newState = { ...data };
+  
+  // 모든 계산은 KST(UTC+9) 기준으로 통일
+  const kstLastUpdate = new Date(lastUpdate.getTime() + (9 * 60 * 60 * 1000));
+  const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
 
-  // 1. Ode Calculation (3시간마다 정해진 수치 회복 - KST 02, 05, 08... 23시)
+  // 1. Ode Calculation
   if (isCharacter) {
     const maxOde = isMembership ? ODE_MAX_MEMBERSHIP : ODE_MAX_NORMAL;
     const rechargeAmount = isMembership ? ODE_RECHARGE_3H_MEMBERSHIP : ODE_RECHARGE_3H_NORMAL;
     
-    // 회복 게이트 판정을 위해 시간을 KST로 변환하여 countGateCrossed 호출
-    const kstLastUpdate = new Date(lastUpdate.getTime() + (9 * 60 * 60 * 1000));
-    const kstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
 
     const gatesPassed = countGateCrossed(kstLastUpdate, kstNow, 3, 2);
     const currentOde = data.ode || 0;
@@ -97,40 +98,45 @@ export const calculateCurrentState = (data: any, now: Date = new Date(), isChara
   // 2. Tickets Calculation
   if (isCharacter) {
     // 원정 티켓: 12시간마다 1장 (05, 17시)
-    const expeditionGates = countGateCrossed(lastUpdate, now, 12, 5);
+    const expeditionGates = countGateCrossed(kstLastUpdate, kstNow, 12, 5);
     newState.expeditionBasic = Math.min(EXPEDITION_MAX_BASIC, (data.expeditionBasic || 0) + expeditionGates);
     
     // 초월 티켓: 24시간마다 2장 (05시)
-    const transcendenceGates = countGateCrossed(lastUpdate, now, 24, 5);
+    const transcendenceGates = countGateCrossed(kstLastUpdate, kstNow, 24, 5);
     newState.transcendenceBasic = Math.min(TRANSCENDENCE_MAX_BASIC, (data.transcendenceBasic || 0) + (transcendenceGates * 2));
 
+    // 악몽 티켓 회복: 매일 2개씩 완료 횟수 차감 (05시) - 최소 0
+    const nightmareGates = countGateCrossed(kstLastUpdate, kstNow, 24, 5);
+    newState.nightmare = Math.max(0, (data.nightmare || 0) - (nightmareGates * 2));
+
     // 성역 티켓: 주간 168시간(1주일)마다 4장 (수요일 05시)
-    const sanctuaryGates = countWeeklyWednesdayGates(lastUpdate, now);
+    const sanctuaryGates = countWeeklyWednesdayGates(kstLastUpdate, kstNow);
     newState.sanctuaryBasic = Math.min(SANCTUARY_MAX_BASIC, (data.sanctuaryBasic || 0) + (sanctuaryGates * 4));
   } else {
     // 계정 레벨 (슈고/침공)
-    const dailyGates = countGateCrossed(lastUpdate, now, 24, 5);
+    const dailyGates = countGateCrossed(kstLastUpdate, kstNow, 24, 5);
     newState.shugoBasic = Math.min(SHUGO_MAX_BASIC, (data.shugoBasic || 0) + (dailyGates * 2));
     newState.invasionBasic = Math.min(INVASION_MAX_BASIC, (data.invasionBasic || 0) + dailyGates);
   }
 
   // 3. Reset Logic (5 AM Daily / Wednesday Weekly)
-  const latestReset = getLatestResetTime(now);
-  if (isAfter(latestReset, lastUpdate)) {
-    if (isCharacter) newState.mission = 0;
+  const latestReset = getLatestResetTime(kstNow);
+  if (isAfter(latestReset, kstLastUpdate)) {
+    if (!isCharacter) {
+      newState.mission = 0; // 사명은 매일 초기화 (계정 레벨)
+    }
 
-    const wednesdayReset = getWednesdayReset(now);
-    if (isAfter(wednesdayReset, lastUpdate)) {
+    const wednesdayReset = getWednesdayReset(kstNow);
+    if (isAfter(wednesdayReset, kstLastUpdate)) {
       if (isCharacter) {
         newState.awakening = 0;
-        newState.sanctuaryCount = 0;
+        newState.sanctuaryCount = 0; // 성역 입장 횟수(사용량) 초기화
         newState.expeditionKillsBasic = EXPEDITION_KILLS_CHAR_LIMIT;
-        newState.expeditionKillsExtra = 0;
         newState.transcendenceKillsBasic = TRANSCENDENCE_KILLS_CHAR_LIMIT;
-        newState.transcendenceKillsExtra = 0;
         newState.sanctuaryKillsBasic = SANCTUARY_KILLS_CHAR_LIMIT;
-        newState.sanctuaryKillsExtra = 0;
+        // Note: expeditionKillsExtra 등 '추가' 수치는 초기화하지 않음
       } else {
+        newState.dailyDungeon = 0; // 일일던전은 매주 수요일 초기화 (계정 레벨)
         newState.expeditionCount = 0;
         newState.transcendenceCount = 0;
         newState.sanctuaryCount = 0;
@@ -139,9 +145,9 @@ export const calculateCurrentState = (data: any, now: Date = new Date(), isChara
 
     // 회랑 리셋 (수/토 22:00)
     if (isCharacter) {
-      const corridorResets = [getWednesday22Reset(now), getSaturday22Reset(now)];
+      const corridorResets = [getWednesday22Reset(kstNow), getSaturday22Reset(kstNow)];
       for (const r of corridorResets) {
-        if (isAfter(r, lastUpdate) && isAfter(now, r)) newState.corridor = 0;
+        if (isAfter(r, kstLastUpdate) && isAfter(kstNow, r)) newState.corridor = 0;
       }
     }
   }

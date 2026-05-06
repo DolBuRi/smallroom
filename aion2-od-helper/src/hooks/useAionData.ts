@@ -34,7 +34,7 @@ export function useAionData() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [characters, setCharacters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [now, setNow] = useState(getKSTNow());
+  const [now, setNow] = useState(new Date());
   const [syncKey, setSyncKey] = useState<string>("");
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export function useAionData() {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(getKSTNow()), 1000);
+    const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -135,7 +135,7 @@ export function useAionData() {
       const account = accounts.find(a => a.id === char?.accountId);
       if (!char || !account) return;
 
-      const calculatedChar = calculateCurrentState(char, getKSTNow(), true, !!account.membership);
+      const calculatedChar = calculateCurrentState(char, new Date(), true, !!account.membership);
       const odeCost = account.membership ? 80 : 40;
       const charUpdates: any = { lastUpdate: new Date().toISOString() };
       
@@ -184,18 +184,41 @@ export function useAionData() {
   };
 
   const toggleCheck = async (id: string, field: string, isAccount: boolean = false) => {
-    const list = isAccount ? accounts : characters;
-    const item = list.find(x => x.id === id);
+    const item = isAccount 
+      ? accounts.find(a => a.id === id) 
+      : characters.find(c => c.id === id);
     if (!item) return;
 
     if (isAccount) {
-      await updateAccount(id, { [field]: !item[field] });
+      const maxMap: Record<string, number> = {
+        mission: 5, dailyDungeon: 1
+      };
+      
+      if (maxMap[field]) {
+        const current = Number(item[field]) || 0;
+        const max = maxMap[field];
+        const newValue = current >= max ? 0 : max;
+        await updateAccount(id, { [field]: newValue, lastUpdate: new Date().toISOString() });
+      } else {
+        const current = item[field];
+        const newValue = typeof current === 'number' ? (current >= 1 ? 0 : 1) : !current;
+        await updateAccount(id, { [field]: newValue, lastUpdate: new Date().toISOString() });
+      }
     } else {
       const maxMap: Record<string, number> = {
-        mission: 5, corridor: 6, dailyDungeon: 1, awakening: 3, attendance: 1
+        mission: 5, corridor: 6, awakening: 3, attendance: 1, nightmare: 14, dailyDungeon: 1
       };
+      
       const current = Number(item[field]) || 0;
       const max = maxMap[field] || 1;
+
+      // 악몽은 웹 대시보드에서 체크박스로 동작하므로 0/14 토글
+      if (field === 'nightmare') {
+        const newValue = current >= 14 ? 0 : 14;
+        await updateCharacter(id, { [field]: newValue, lastUpdate: new Date().toISOString() });
+        return;
+      }
+
       const newValue = current >= max ? 0 : max;
       await updateCharacter(id, { [field]: newValue, lastUpdate: new Date().toISOString() });
     }
@@ -238,6 +261,7 @@ export function useAionData() {
       expeditionCount: 0,
       transcendenceCount: 0,
       sanctuaryCount: 0,
+      dailyDungeon: 0,
       lastUpdate: new Date().toISOString()
     };
     await set(ref(db, `users/${syncKey}/od_helper/accounts/${newId}`), newAcc);
@@ -278,6 +302,7 @@ export function useAionData() {
       corridor: 0,
       dailyDungeon: 0,
       awakening: 0,
+      nightmare: 0,
       attendance: 0,
       lastUpdate: new Date().toISOString()
     };

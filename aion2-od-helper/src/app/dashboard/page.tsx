@@ -300,7 +300,7 @@ function AccountGroup({ account, characters, allCharacters, onExecute, onManual,
     <>
       <tbody className="bg-slate-50/30 dark:bg-slate-900/40 cursor-pointer select-none group/acc" onClick={() => setCollapsed(!collapsed)}>
         <tr className="border-t border-slate-100 dark:border-slate-800">
-          <td colSpan={12} className="px-6 py-2.5">
+          <td colSpan={13} className="px-6 py-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-black text-slate-800 dark:text-white tracking-tight">{account.name || '미지정 계정'}</span>
@@ -372,9 +372,10 @@ function AccountGroup({ account, characters, allCharacters, onExecute, onManual,
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight w-44 whitespace-nowrap">초월 티켓</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight w-44 whitespace-nowrap">성역 티켓</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">사명</th>
+              <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">일일던전</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">회랑</th>
-              <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-28 whitespace-nowrap">일일던전</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">각성</th>
+              <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">악몽</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">원정</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">초월</th>
               <th className="px-6 py-3 text-[10px] font-black text-slate-400 dark:text-neutral-400 uppercase tracking-tight text-center w-20 whitespace-nowrap">성역</th>
@@ -564,16 +565,19 @@ function CharacterRow({ char, account, onManual, charHandleAction, onToggle }: a
                   </div>
               </td>
               <td className="px-6 py-3 text-center">
-                <input type="checkbox" checked={(char.mission || 0) >= 5} onChange={() => onToggle(char.id, 'mission')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
+                <input type="checkbox" checked={(account.mission || 0) >= 5} onChange={() => onToggle(account.id, 'mission', true)} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
+              </td>
+              <td className="px-6 py-3 text-center">
+                <input type="checkbox" checked={(account.dailyDungeon || 0) >= 1} onChange={() => onToggle(account.id, 'dailyDungeon', true)} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
               </td>
               <td className="px-6 py-3 text-center">
                 <input type="checkbox" checked={(char.corridor || 0) >= 6} onChange={() => onToggle(char.id, 'corridor')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
               </td>
               <td className="px-6 py-3 text-center">
-                <input type="checkbox" checked={(char.dailyDungeon || 0) >= 1} onChange={() => onToggle(char.id, 'dailyDungeon')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
+                <input type="checkbox" checked={(char.awakening || 0) >= 3} onChange={() => onToggle(char.id, 'awakening')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
               </td>
               <td className="px-6 py-3 text-center">
-                <input type="checkbox" checked={(char.awakening || 0) >= 3} onChange={() => onToggle(char.id, 'awakening')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
+                <input type="checkbox" checked={(char.nightmare || 0) >= 14} onChange={() => onToggle(char.id, 'nightmare')} className="w-5 h-5 rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-500 focus:ring-indigo-500/20 shadow-sm" />
               </td>
               <td className="px-6 py-3 text-center">
                 <ActionButtonWithTooltip 
@@ -592,7 +596,7 @@ function CharacterRow({ char, account, onManual, charHandleAction, onToggle }: a
               <td className="px-6 py-3 text-center">
                 <ActionButtonWithTooltip 
                   label="성역 실행" 
-                  desc={account.membership ? "오드 80 + 보상 횟수 1회 소모" : "오드 40 + 보상 횟수 1회 소모"}
+                  desc={account.membership ? "오드 80 + 입장 횟수 1회 + 보상 횟수 1회 소모" : "오드 40 + 입장 횟수 1회 + 보상 횟수 1회 소모"}
                   onClick={(e) => charHandleAction(e, char.id, 'sanctuary')}
                 />
               </td>

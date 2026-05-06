@@ -4,8 +4,8 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 
-import { Settings, X, Loader2, Lock, ChevronDown, ChevronUp, AlertCircle, Undo2, CloudCheck, CloudOff, RefreshCw, Circle, Key, User, ChevronRight, Trash2, Check, Plus, Globe, Camera, Scan, Clock, Bell, Layers } from "lucide-react"
-
+import { Settings, X, Loader2, Lock, ChevronDown, ChevronUp, AlertCircle, Info, Ticket, Undo2, CloudCheck, CloudOff, RefreshCw, Circle, Key, User, ChevronRight, ChevronLeft, Trash2, Check, Plus, Globe, Camera, Scan, Clock, Bell, Layers, Zap } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 
 import { db, ensureAuth } from "@/lib/firebase"
@@ -19,53 +19,46 @@ import { ref, onValue, set, Unsubscribe } from "firebase/database"
 // --- Types ---
 
 interface Character {
-
   id: string;
-
   accountId: string;
-
   name: string;
-
   className: string;
-
   ode: number;
-
   odeExtra: number;
-
   lastUpdate: string;
-
+  expeditionBasic?: number;
+  expeditionExtra?: number;
+  transcendenceBasic?: number;
+  transcendenceExtra?: number;
+  sanctuaryBasic?: number;
+  sanctuaryExtra?: number;
   expeditionKillsBasic: number;
-
   expeditionKillsExtra: number;
-
   transcendenceKillsBasic: number;
-
   transcendenceKillsExtra: number;
-
+  sanctuaryKillsBasic?: number;
+  sanctuaryKillsExtra?: number;
   corridor?: number | boolean;
-
   awakening?: number | boolean;
-
   sanctuary?: number | boolean;
-
-  mission?: number | boolean; // 사명
-
-  attendance?: number | boolean; // 출석부
-
-  dailyDungeon?: number | boolean; // 일일던전
-
+  mission?: number | boolean;
+  attendance?: number | boolean;
+  dailyDungeon?: number | boolean;
+  nightmare?: number | boolean;
+  [key: string]: any;
 }
 
-
-
 interface Account {
-
   id: string;
-
   name: string;
-
   membership: boolean;
-
+  shugoBasic?: number;
+  shugoExtra?: number;
+  invasionBasic?: number;
+  invasionExtra?: number;
+  mission?: number | boolean;
+  dailyDungeon?: number | boolean;
+  [key: string]: any;
 }
 
 
@@ -89,13 +82,6 @@ interface GameConfig {
 interface AlerterConfig {
   enabled: boolean;
   volume: number;
-  riftEnabled: boolean;
-  nahmaEnabled: boolean;
-  shugoEnabled: boolean;
-  shugo15Enabled: boolean;
-  shugo45Enabled: boolean;
-  invasionEnabled: boolean;
-  nahmaCountdown: boolean;
   timeOffset: number;
 }
 
@@ -159,9 +145,8 @@ export default function HudPage() {
 
 
   const [isEditingOde, setIsEditingOde] = useState(false)
-
   const [isEditingExtraOde, setIsEditingExtraOde] = useState(false)
-
+  const [editingTicketField, setEditingTicketField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("")
 
 
@@ -186,13 +171,50 @@ export default function HudPage() {
 
   const [isMinimal, setIsMinimal] = useState<boolean>(() => (typeof window !== "undefined" ? localStorage.getItem('aion_is_minimal') !== 'false' : true)); // 기본값 true(접힘/최소화)
   const [isCompact, setIsCompact] = useState<boolean>(() => (typeof window !== "undefined" ? localStorage.getItem('aion_is_compact') === 'true' : false)); // [NEW] 압축 모드
+  const [simpleOdeCharge, setSimpleOdeCharge] = useState<boolean>(() => (typeof window !== "undefined" ? localStorage.getItem('aion_simple_ode_charge') === 'true' : false)); // [NEW] 간편 오드 충전
+  const [ticketValidation, setTicketValidation] = useState<boolean>(() => (typeof window !== "undefined" ? localStorage.getItem('aion_ticket_validation') !== 'false' : true)); // [NEW] 티켓 유효성 체크 (기본값 true)
 
   // --- Hotkey State ---
-  const [hotkeys, setHotkeys] = useState<{ toggleHud: string, toggleCompact: string, toggleDetails: string }>({
-    toggleHud: 'Shift+`',
-    toggleCompact: 'Shift+1',
-    toggleDetails: 'Shift+2'
+  const [hotkeys, setHotkeys] = useState<{ toggleHud: string, toggleCompact: string, toggleDetails: string }>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem('aion_hotkeys');
+      if (saved) {
+        try { return JSON.parse(saved); } catch(e) {}
+      }
+    }
+    return {
+      toggleHud: 'Control+Alt+H',
+      toggleCompact: 'Control+Alt+C',
+      toggleDetails: 'Control+Alt+D'
+    };
   });
+
+  const [activeContentIdx, setActiveContentIdx] = useState(0);
+  const contentTypes = ['expedition', 'transcendence', 'sanctuary'] as const;
+  const activeContentType = contentTypes[activeContentIdx];
+
+  const contentInfoMap = useMemo(() => {
+    const selectedChar = characters.find(c => c.id === selectedCharId);
+    if (!selectedChar) return null;
+    return {
+      expedition: {
+        label: "원정",
+        rewards: { basic: selectedChar.expeditionBasic || 0, extra: selectedChar.expeditionExtra || 0 },
+        kills: { basic: selectedChar.expeditionKillsBasic || 0, extra: selectedChar.expeditionKillsExtra || 0 }
+      },
+      transcendence: {
+        label: "초월",
+        rewards: { basic: selectedChar.transcendenceBasic || 0, extra: selectedChar.transcendenceExtra || 0 },
+        kills: { basic: selectedChar.transcendenceKillsBasic || 0, extra: selectedChar.transcendenceKillsExtra || 0 }
+      },
+      sanctuary: {
+        label: "성역",
+        rewards: { basic: selectedChar.sanctuaryBasic || 0, extra: selectedChar.sanctuaryExtra || 0 },
+        kills: { basic: selectedChar.sanctuaryKillsBasic || 0, extra: selectedChar.sanctuaryKillsExtra || 0 }
+      }
+    };
+  }, [characters, selectedCharId]);
+
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
   const [hotkeyWarning, setHotkeyWarning] = useState<string | null>(null);
 
@@ -224,13 +246,6 @@ export default function HudPage() {
   const [alerterConfig, setAlerterConfig] = useState<AlerterConfig>({
     enabled: true,
     volume: 80,
-    riftEnabled: true,
-    nahmaEnabled: true,
-    shugoEnabled: true,
-    shugo15Enabled: true,
-    shugo45Enabled: true,
-    invasionEnabled: true,
-    nahmaCountdown: true,
     timeOffset: 0,
   });
 
@@ -248,6 +263,12 @@ export default function HudPage() {
 
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [compactToast, setCompactToast] = useState<{show: boolean, value: boolean}>({ show: false, value: false });
+  const [toast, setToast] = useState<{show: boolean, message: string, type: 'info' | 'error'}>({ show: false, message: "", type: 'info' });
+
+  const showToast = (message: string, type: 'info' | 'error' = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast(p => ({ ...p, show: false })), 2500);
+  };
 
   const [mapTemplates, setMapTemplates] = useState<Record<string, string>>({}); // name -> dataUrl
 
@@ -341,110 +362,7 @@ export default function HudPage() {
     if (!alerterConfig.enabled || !syncKey) return;
 
     const timer = setInterval(() => {
-      const now = new Date(Date.now() + (alerterConfig.timeOffset * 1000));
-      const nowTime = now.getTime();
-      const currentMinuteStr = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
-      
-      lastCheckMinuteRef.current = currentMinuteStr;
-
-      const checkAlarm = (type: string, targetTime: number, offset: number, fileName: string, msg: string) => {
-        const alarmTime = targetTime - (offset * 60000);
-        const key = `${type}-${targetTime}-${offset}`;
-        
-        if (nowTime >= alarmTime && nowTime < alarmTime + 45000 && !triggeredAlarmsRef.current.has(key)) {
-          triggeredAlarmsRef.current.add(key);
-          playAionSound(msg, fileName);
-          remoteLog('info', `Alarm triggered: ${key}`);
-          
-          if (triggeredAlarmsRef.current.size > 100) {
-            const twentyFourHoursAgo = nowTime - 86400000;
-            triggeredAlarmsRef.current.forEach(k => {
-              const parts = k.split('-');
-              if (parts.length >= 2 && parseInt(parts[1]) < twentyFourHoursAgo) {
-                triggeredAlarmsRef.current.delete(k);
-              }
-            });
-          }
-        }
-      };
-
-      if (alerterConfig.riftEnabled) {
-        const RIFT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23];
-        RIFT_HOURS.forEach(hour => {
-          const target = new Date(now);
-          target.setHours(hour, 0, 0, 0);
-          if (target.getTime() < nowTime - 1800000) return;
-          
-          [0, 1, 3, 5].forEach(offset => {
-            const msg = offset === 0 ? "시공의 균열이 생성되었습니다." : `${offset}분 후 시공의 균열이 생성됩니다.`;
-            const file = offset === 0 ? "rift_spawn.mp3" : `rift_pre_${offset}min.mp3`;
-            checkAlarm('rift', target.getTime(), offset, file, msg);
-          });
-        });
-      }
-
-      if (alerterConfig.shugoEnabled) {
-        for (let h = 0; h < 24; h++) {
-          const isEven = h % 2 === 0;
-          const targetMin = isEven ? 15 : 45;
-          const isTargetEnabled = isEven ? alerterConfig.shugo15Enabled : alerterConfig.shugo45Enabled;
-          
-          if (isTargetEnabled) {
-            const target = new Date(now);
-            target.setHours(h, targetMin, 0, 0);
-            if (target.getTime() < nowTime - 1800000) continue;
-
-            [0, 1, 3, 5].forEach(offset => {
-              const msg = offset === 0 ? "슈고페스타가 등장했습니다." : `${offset}분 후 슈고페스타가 등장합니다.`;
-              const file = offset === 0 ? "shugo_spawn.mp3" : `shugo_pre_${offset}min.mp3`;
-              checkAlarm('shugo', target.getTime(), offset, file, msg);
-            });
-          }
-        }
-      }
-
-      if (alerterConfig.invasionEnabled) {
-        for (let h = 0; h < 24; h++) {
-          const target = new Date(now);
-          target.setHours(h, 30, 0, 0);
-          if (target.getTime() < nowTime - 1800000) continue;
-
-          [0, 1, 3, 5].forEach(offset => {
-            const msg = offset === 0 ? "차원 침공이 등장하였습니다." : `${offset}분 후 차원 침공이 등장합니다.`;
-            const file = offset === 0 ? "invasion_spawn.mp3" : `invasion_pre_${offset}min.mp3`;
-            checkAlarm('invasion', target.getTime(), offset, file, msg);
-          });
-        }
-      }
-
-      if (alerterConfig.nahmaEnabled) {
-        const day = now.getDay();
-        if (day === 0 || day === 6) {
-          const target = new Date(now);
-          target.setHours(20, 0, 0, 0);
-          if (target.getTime() >= nowTime - 1800000) {
-            [0, 1, 3, 5].forEach(offset => {
-              const msg = offset === 0 ? "어비스: 나흐마가 등장하였습니다." : `${offset}분 후 어비스: 나흐마가 등장합니다.`;
-              const file = offset === 0 ? "nahma_spawn.mp3" : `nahma_pre_${offset}min.mp3`;
-              checkAlarm('nahma', target.getTime(), offset, file, msg);
-            });
-
-            if (alerterConfig.nahmaCountdown) {
-              const countdownTime = target.getTime() - 5000;
-              const cKey = `nahma-countdown-${target.getTime()}`;
-              if (nowTime >= countdownTime && nowTime < countdownTime + 2000 && !triggeredAlarmsRef.current.has(cKey)) {
-                triggeredAlarmsRef.current.add(cKey);
-                playAionSound("나흐마 등장 5초 전", "count_5.mp3");
-                setTimeout(() => playAionSound("4", "count_4.mp3"), 1000);
-                setTimeout(() => playAionSound("3", "count_3.mp3"), 2000);
-                setTimeout(() => playAionSound("2", "count_2.mp3"), 3000);
-                setTimeout(() => playAionSound("1", "count_1.mp3"), 4000);
-              }
-            }
-          }
-        }
-      }
-
+      // Logic for alarms removed
     }, 1000);
 
     return () => clearInterval(timer);
@@ -481,13 +399,7 @@ export default function HudPage() {
         const next = { ...prev, [currentSelectionTarget]: region };
         localStorage.setItem('aion_ocr_regions', JSON.stringify(next));
         
-        // 자동 파일 저장
-        if ((window as any).api) {
-          (window as any).api.invoke('save-config', {
-            syncKey, intelligentHide, isMinimal, opacity, defaultBrowser, mapTemplates, loadingTemplate,
-            ocrRegions: next
-          });
-        }
+        // saveAllConfigs가 1초 뒤 자동으로 저장하므로 여기서는 상태만 업데이트
         return next;
       });
       setOcrEnabled(true);
@@ -566,6 +478,8 @@ export default function HudPage() {
               if (d.intelligentHide !== undefined) setIntelligentHide(d.intelligentHide);
               if (d.isMinimal !== undefined) setIsMinimal(d.isMinimal);
               if (d.isExpanded !== undefined) setIsExpanded(d.isExpanded);
+              if (d.isCompact !== undefined) setIsCompact(d.isCompact);
+              if (d.simpleOdeCharge !== undefined) setSimpleOdeCharge(d.simpleOdeCharge);
               if (d.opacity !== undefined) setOpacity(d.opacity);
               if (d.defaultBrowser) setDefaultBrowser(d.defaultBrowser);
               if (d.mapTemplates) setMapTemplates(d.mapTemplates);
@@ -584,7 +498,10 @@ export default function HudPage() {
                 img.src = d.loadingTemplate;
               }
               if (d.ocrRegions) setOcrRegions(d.ocrRegions);
-              if (d.hotkeys) setHotkeys(d.hotkeys);
+              if (d.hotkeys) {
+                setHotkeys(d.hotkeys);
+                localStorage.setItem('aion_hotkeys', JSON.stringify(d.hotkeys));
+              }
               
               setConfigStatus("LOADED_FILE");
               setLoading(false);
@@ -607,6 +524,11 @@ export default function HudPage() {
         const savedRegions = localStorage.getItem('aion_ocr_regions');
         if (savedRegions) {
           try { setOcrRegions(JSON.parse(savedRegions)); } catch(e) {}
+        }
+        
+        const savedHotkeys = localStorage.getItem('aion_hotkeys');
+        if (savedHotkeys) {
+          try { setHotkeys(JSON.parse(savedHotkeys)); } catch(e) {}
         }
 
         setConfigStatus("LOADED_LOCAL");
@@ -1060,11 +982,14 @@ export default function HudPage() {
         intelligentHide: overrides?.intelligentHide ?? intelligentHide,
         isMinimal: overrides?.isMinimal ?? isMinimal,
         isExpanded: overrides?.isExpanded ?? isExpanded,
+        isCompact: overrides?.isCompact ?? isCompact,
+        simpleOdeCharge: overrides?.simpleOdeCharge ?? simpleOdeCharge,
         opacity: overrides?.opacity ?? opacity,
         defaultBrowser: overrides?.defaultBrowser || defaultBrowser,
         mapTemplates: overrides?.mapTemplates || mapTemplates,
         loadingTemplate: overrides?.loadingTemplate || loadingTemplate,
-        ocrRegions: overrides?.ocrRegions || ocrRegions
+        ocrRegions: overrides?.ocrRegions || ocrRegions,
+        hotkeys: overrides?.hotkeys || hotkeys
       };
       
       await (window as any).api.invoke('save-config', configToSave);
@@ -1072,7 +997,7 @@ export default function HudPage() {
     } catch (e) {
       console.error("Auto-save error", e);
     }
-  }, [syncKey, intelligentHide, isMinimal, isExpanded, opacity, defaultBrowser, mapTemplates, loadingTemplate, ocrRegions]);
+  }, [syncKey, intelligentHide, isMinimal, isExpanded, isCompact, simpleOdeCharge, opacity, defaultBrowser, mapTemplates, loadingTemplate, ocrRegions, hotkeys]);
 
   useEffect(() => {
     const timer = setTimeout(saveAllConfigs, 1000);
@@ -1083,7 +1008,8 @@ export default function HudPage() {
     localStorage.setItem('aion_is_expanded', JSON.stringify(isExpanded));
     localStorage.setItem('aion_is_minimal', JSON.stringify(isMinimal));
     localStorage.setItem('aion_is_compact', JSON.stringify(isCompact));
-  }, [isExpanded, isMinimal, isCompact]);
+    localStorage.setItem('aion_simple_ode_charge', JSON.stringify(simpleOdeCharge));
+  }, [isExpanded, isMinimal, isCompact, simpleOdeCharge]);
 
 
 
@@ -1144,7 +1070,8 @@ export default function HudPage() {
         defaultBrowser,
         mapTemplates,
         loadingTemplate,
-        ocrRegions
+        ocrRegions,
+        hotkeys
       });
       
       remoteLog('info', "Direct save-config result:", res);
@@ -1215,14 +1142,7 @@ export default function HudPage() {
       setLoadingTemplate(dataUrl);
       loadingTemplatePixelsRef.current = ctx.getImageData(0, 0, 40, 40).data;
       localStorage.setItem('aion_loading_template', dataUrl);
-
-      if ((window as any).api) {
-        await (window as any).api.invoke('save-config', {
-          syncKey, intelligentHide, isMinimal, opacity, defaultBrowser, mapTemplates,
-          loadingTemplate: dataUrl,
-          ocrRegions
-        });
-      }
+      // saveAllConfigs (useEffect)에 의해 1초 뒤 자동 저장됨
 
       setOcrStatus("✅ 로딩 템플릿 등록 완료");
 
@@ -1251,10 +1171,12 @@ export default function HudPage() {
 
 
   const selectedAccount = useMemo(() => {
-
-    return accounts.find(a => a.id === selectedAccountId) || accounts[0] || null;
-
-  }, [accounts, selectedAccountId]);
+    const rawAccount = accounts.find(a => a.id === selectedAccountId) || accounts[0] || null;
+    if (!rawAccount) return null;
+    
+    // 계정 레벨 데이터 (일일던전, 슈고, 침공 등) 리셋 로직 적용
+    return calculateCurrentState(rawAccount, new Date(currentTime), false, !!rawAccount.membership);
+  }, [accounts, selectedAccountId, currentTime]);
 
 
 
@@ -1756,7 +1678,31 @@ export default function HudPage() {
 
     const cost = selectedAccount.membership ? config.costs.membership : config.costs.normal;
 
-    if (calculatedEnergy + (selectedChar.odeExtra || 0) < cost) return;
+    if (calculatedEnergy + (selectedChar.odeExtra || 0) < cost) {
+      showToast("오드가 부족합니다.", "error");
+      return;
+    }
+
+    // --- Ticket Validation ---
+    if (ticketValidation) {
+      if (type === 'expedition') {
+        const rewardTotal = (selectedChar.expeditionBasic || 0) + (selectedChar.expeditionExtra || 0);
+        const killTotal = (selectedChar.expeditionKillsBasic || 0) + (selectedChar.expeditionKillsExtra || 0);
+        if (rewardTotal <= 0) { showToast("원정 티켓이 부족합니다.", "error"); return; }
+        if (killTotal <= 0) { showToast("원정 보스 처치 가능 횟수가 부족합니다.", "error"); return; }
+      } else if (type === 'transcendence') {
+        const rewardTotal = (selectedChar.transcendenceBasic || 0) + (selectedChar.transcendenceExtra || 0);
+        const killTotal = (selectedChar.transcendenceKillsBasic || 0) + (selectedChar.transcendenceKillsExtra || 0);
+        if (rewardTotal <= 0) { showToast("초월 티켓이 부족합니다.", "error"); return; }
+        if (killTotal <= 0) { showToast("초월 보스 처치 가능 횟수가 부족합니다.", "error"); return; }
+      } else if (type === 'sanctuary') {
+        const rewardTotal = (selectedChar.sanctuaryBasic || 0) + (selectedChar.sanctuaryExtra || 0);
+        const killTotal = (selectedChar.sanctuaryKillsBasic || 0) + (selectedChar.sanctuaryKillsExtra || 0);
+        // 성역은 입장(4회)이 먼저 소진되는 경우가 많으므로 문구를 명확히 함
+        if (rewardTotal <= 0) { showToast("성역 입장 가능 횟수(티켓)가 부족합니다.", "error"); return; }
+        if (killTotal <= 0) { showToast("성역 보상 획득 가능 횟수가 부족합니다.", "error"); return; }
+      }
+    }
 
     
 
@@ -1773,28 +1719,50 @@ export default function HudPage() {
     
 
     if (type === 'expedition') {
-
        if (updated.expeditionKillsBasic > 0) updated.expeditionKillsBasic -= 1;
-
        else if (updated.expeditionKillsExtra > 0) updated.expeditionKillsExtra -= 1;
 
+       if (updated.expeditionBasic > 0) updated.expeditionBasic -= 1;
+       else if (updated.expeditionExtra > 0) updated.expeditionExtra -= 1;
     } else if (type === 'transcendence') {
-
        if (updated.transcendenceKillsBasic > 0) updated.transcendenceKillsBasic -= 1;
-
        else if (updated.transcendenceKillsExtra > 0) updated.transcendenceKillsExtra -= 1;
 
+       if (updated.transcendenceBasic > 0) updated.transcendenceBasic -= 1;
+       else if (updated.transcendenceExtra > 0) updated.transcendenceExtra -= 1;
+    } else if (type === 'sanctuary') {
+       if (updated.sanctuaryKillsBasic > 0) updated.sanctuaryKillsBasic -= 1;
+       else if (updated.sanctuaryKillsExtra > 0) updated.sanctuaryKillsExtra -= 1;
+
+       if (updated.sanctuaryBasic > 0) updated.sanctuaryBasic -= 1;
+       else if (updated.sanctuaryExtra > 0) updated.sanctuaryExtra -= 1;
     }
 
     
 
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c));
-
     await saveToFirebase(`users/${syncKey}/od_helper/members/${updated.id}`, updated);
 
+    // [NEW] 대시보드 동기화를 위한 계정별 누적 횟수 업데이트
+    const accField = type === 'expedition' ? 'expeditionCount' : type === 'transcendence' ? 'transcendenceCount' : 'sanctuaryCount';
+    
+    // selectedAccount에서 가져오되, accounts 배열에서 최신 상태를 찾는 것이 더 안전함
+    const latestAcc = accounts.find(a => a.id === selectedAccount?.id) || selectedAccount;
+    const currentAccCount = (latestAcc as any)?.[accField] || 0;
+    
+    await updateAccountData({ [accField]: currentAccCount + 1 });
   }
 
-
+  const handleChargeOde = (amount: number) => {
+    if (!selectedChar) return;
+    const currentExtra = selectedChar.odeExtra || 0;
+    const maxExtra = config.maxChargedOde || 2000;
+    updateCharacterData({
+      ode: calculatedEnergy, // 🚩 중요: lastUpdate 갱신 전 현재 자연회복된 오드를 기본 오드로 고정
+      odeExtra: Math.min(maxExtra, currentExtra + amount),
+      lastUpdate: new Date().toISOString()
+    });
+  }
 
   // [NEW] 범용 데이터 업데이트 함수 (상태 토글 및 수량 조절용)
   const updateCharacterData = async (fields: Partial<Character>) => {
@@ -1802,6 +1770,13 @@ export default function HudPage() {
     const updated = { ...selectedChar, ...fields };
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c));
     await saveToFirebase(`users/${syncKey}/od_helper/members/${updated.id}`, updated);
+  }
+
+  const updateAccountData = async (fields: Partial<Account>) => {
+    if (!selectedAccount || !syncKey) return;
+    const updated = { ...selectedAccount, ...fields } as any;
+    setAccounts(prev => prev.map(a => a.id === updated.id ? updated : a));
+    await saveToFirebase(`users/${syncKey}/od_helper/accounts/${updated.id}`, updated);
   }
 
   const updateAlerterConfig = async (fields: Partial<AlerterConfig>) => {
@@ -1814,13 +1789,10 @@ export default function HudPage() {
   // --- Hotkey Update Logic ---
   const updateHotkeys = async (newHotkeys: typeof hotkeys) => {
     setHotkeys(newHotkeys);
+    localStorage.setItem('aion_hotkeys', JSON.stringify(newHotkeys));
     if ((window as any).api) {
       await (window as any).api.invoke('update-hotkeys', newHotkeys);
-      // 설정 파일에도 저장
-      await (window as any).api.invoke('save-config', {
-        syncKey, intelligentHide, isMinimal, opacity, defaultBrowser, mapTemplates, loadingTemplate, ocrRegions,
-        hotkeys: newHotkeys
-      });
+      // saveAllConfigs (useEffect)에 의해 1초 뒤 자동 저장됨
     }
   };
 
@@ -1860,39 +1832,28 @@ export default function HudPage() {
 
 
   const handleUpdateOdeValue = async () => {
-
     if (!selectedChar || !syncKey) return;
-
     const numValue = parseInt(editValue) || 0;
-
     
-
     let updatedFields: Partial<Character> = {};
-
     if (isEditingOde) {
-
       updatedFields.ode = Math.min(config.maxBaseOde, numValue);
-
       updatedFields.lastUpdate = new Date().toISOString();
-
     } else if (isEditingExtraOde) {
-
       updatedFields.odeExtra = Math.min(config.maxChargedOde, numValue);
-
     }
 
-
-
     await updateCharacterData(updatedFields);
-
-    
-
     setIsEditingOde(false);
-
     setIsEditingExtraOde(false);
-
     setEditValue("");
+  };
 
+  const handleUpdateTicketValue = async () => {
+    if (!editingTicketField || !selectedCharId) return;
+    const val = parseInt(editValue) || 0;
+    await updateCharacterData({ [editingTicketField]: val });
+    setEditingTicketField(null);
   };
 
 
@@ -1957,7 +1918,7 @@ export default function HudPage() {
 
               <div className="flex items-center gap-1 group relative">
 
-                <User className="w-3 h-3 text-slate-500" />
+                <User className="w-3 h-3 text-slate-300" />
 
                 <select 
 
@@ -1973,13 +1934,13 @@ export default function HudPage() {
 
                 </select>
 
-                <ChevronDown className="w-3 h-3 text-slate-600 group-hover:text-white pointer-events-none absolute right-0" />
+                <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-white pointer-events-none absolute right-0" />
 
               </div>
 
             ) : (
 
-              <span className="text-[10px] font-bold text-slate-500">{syncKey ? "데이터 없음" : "연동 필요"}</span>
+              <span className="text-[10px] font-bold text-slate-300">{syncKey ? "데이터 없음" : "연동 필요"}</span>
 
             )}
 
@@ -1987,13 +1948,13 @@ export default function HudPage() {
 
           <div className="no-drag flex items-center gap-0.5">
 
-            <button className={cn("p-1.5 rounded text-slate-500 hover:text-white", isSyncing && "text-indigo-400")}><RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} /></button>
+            <button className={cn("p-1.5 rounded text-slate-300 hover:text-white", isSyncing && "text-indigo-400")}><RefreshCw className={cn("w-3.5 h-3.5", isSyncing && "animate-spin")} /></button>
 
-            <button onClick={() => setIsLocked(!isLocked)} className={cn("p-1.5 rounded text-slate-500 hover:text-white", isLocked && "text-indigo-400")}><Lock className="w-3.5 h-3.5" fill={isLocked ? "currentColor" : "none"} /></button>
+            <button onClick={() => setIsLocked(!isLocked)} className={cn("p-1.5 rounded text-slate-300 hover:text-white", isLocked && "text-indigo-400")}><Lock className="w-3.5 h-3.5" fill={isLocked ? "currentColor" : "none"} /></button>
 
-            <button onClick={() => setView(view === "hud" ? "settings" : "hud")} className={cn("p-1.5 rounded hover:text-white transition-colors", view === "settings" ? "text-indigo-400" : "text-slate-500")} title="환경 설정"><Settings className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setView(view === "hud" ? "settings" : "hud")} className={cn("p-1.5 rounded hover:text-white transition-colors", view === "settings" ? "text-indigo-400" : "text-slate-300")} title="환경 설정"><Settings className="w-3.5 h-3.5" /></button>
 
-            <button onClick={() => (window as any).api?.invoke('close-window')} className="p-1.5 rounded text-slate-500 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>
+            <button onClick={() => (window as any).api?.invoke('close-window')} className="p-1.5 rounded text-slate-300 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>
 
           </div>
 
@@ -2025,7 +1986,7 @@ export default function HudPage() {
 
               <Key className="w-8 h-8 text-slate-700" />
 
-              <div className="text-xs font-bold text-slate-400">웹사이트에서 동기화 키를 복사하여<br/>설정창에 입력해 주세요.</div>
+              <div className="text-xs font-bold text-slate-200">웹사이트에서 동기화 키를 복사하여<br/>설정창에 입력해 주세요.</div>
 
               
 
@@ -2065,11 +2026,11 @@ export default function HudPage() {
 
               <CloudOff className="w-8 h-8 text-slate-700" />
 
-              <div className="text-xs font-bold text-slate-400">연동된 캐릭터가 없습니다.<br/>웹사이트에서 먼저 캐릭터를 등록하세요.</div>
+              <div className="text-xs font-bold text-slate-200">연동된 캐릭터가 없습니다.<br/>웹사이트에서 먼저 캐릭터를 등록하세요.</div>
 
-              <div className="text-[9px] text-slate-600 font-bold bg-white/5 px-2 py-1 rounded">현재 연동 키: {syncKey}</div>
+              <div className="text-[9px] text-slate-400 font-bold bg-white/5 px-2 py-1 rounded">현재 연동 키: {syncKey}</div>
 
-              <button onClick={() => setView("settings")} className="mt-2 px-4 py-2 bg-slate-800 text-slate-400 text-[9px] font-bold rounded-lg hover:text-white transition-colors">키 다시 입력하기</button>
+              <button onClick={() => setView("settings")} className="mt-2 px-4 py-2 bg-slate-800 text-slate-200 text-[9px] font-bold rounded-lg hover:text-white transition-colors">키 다시 입력하기</button>
 
             </div>
 
@@ -2107,7 +2068,7 @@ export default function HudPage() {
 
                         </select>
 
-                        <ChevronDown className="absolute right-0 w-5 h-5 text-slate-500 group-hover:text-indigo-400 pointer-events-none transition-colors" />
+                        <ChevronDown className="absolute right-0 w-5 h-5 text-slate-300 group-hover:text-indigo-400 pointer-events-none transition-colors" />
 
                     </div>
 
@@ -2118,7 +2079,7 @@ export default function HudPage() {
                         {/* 멤버쉽 상태 */}
                         <div className="flex items-center gap-1 bg-slate-800/40 px-1.5 py-0.5 rounded border border-white/5 shadow-sm">
                           <div className={cn("w-1.5 h-1.5 rounded-full", selectedAccount?.membership ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-slate-500")} />
-                          <span className={cn("text-[9px] font-black uppercase tracking-tight", selectedAccount?.membership ? "text-amber-400/90" : "text-slate-400")}>
+                          <span className={cn("text-[9px] font-black uppercase tracking-tight", selectedAccount?.membership ? "text-amber-400/90" : "text-slate-200")}>
                             {selectedAccount?.membership ? "멤버쉽" : "일반"}
                           </span>
                         </div>
@@ -2168,7 +2129,7 @@ export default function HudPage() {
                     </div>
 
                   <div className="flex items-baseline gap-1 group no-drag">
-                      <Plus className="w-2.5 h-2.5 text-slate-500 font-black" />
+                      <Plus className="w-2.5 h-2.5 text-slate-200 font-black" />
                       {isEditingExtraOde ? (
                           <input 
                               autoFocus
@@ -2212,57 +2173,219 @@ export default function HudPage() {
 
 
 
-              <div className="flex flex-col gap-2.5 my-1">
-                {/* 메인 오드 게이지 (Smooth Bar) */}
-                <div className="relative w-full h-2.5 bg-slate-900/50 rounded-full overflow-hidden border border-white/5 shadow-inner group">
-                  <div 
-                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-700 ease-out shadow-[0_0_12px_rgba(99,102,241,0.4)]"
-                    style={{ width: `${energyPercent}%` }}
-                  />
-                  {/* Subtle Markers every 20% */}
-                  <div className="absolute inset-0 flex justify-between pointer-events-none px-[20%]">
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
+              <div className="flex items-center gap-3 my-1">
+                <div className={cn("flex flex-col gap-2.5 transition-all duration-300", simpleOdeCharge ? "w-[calc(100%-130px)]" : "w-full")}>
+                  {/* 메인 오드 게이지 (Smooth Bar) */}
+                  <div className="relative w-full h-2.5 bg-slate-900/50 rounded-full overflow-hidden border border-white/5 shadow-inner group">
+                    <div 
+                      className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-700 ease-out shadow-[0_0_12px_rgba(99,102,241,0.4)]"
+                      style={{ width: `${energyPercent}%` }}
+                    />
+                    {/* Subtle Markers every 20% */}
+                    <div className="absolute inset-0 flex justify-between pointer-events-none px-[20%]">
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                    </div>
+                  </div>
+
+                  {/* 추가 오드 게이지 (Smooth Bar) */}
+                  <div className="relative w-full h-2 bg-slate-900/50 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                    <div 
+                      className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-700 ease-out shadow-[0_0_10px_rgba(168,85,247,0.3)]"
+                      style={{ width: `${extraOdePercent}%` }}
+                    />
+                    {/* Subtle Markers every 20% */}
+                    <div className="absolute inset-0 flex justify-between pointer-events-none px-[20%]">
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                      <div className="w-[1px] h-full bg-white/5" />
+                    </div>
                   </div>
                 </div>
 
-                {/* 추가 오드 게이지 (Smooth Bar) */}
-                <div className="relative w-full h-2 bg-slate-900/50 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                  <div 
-                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-700 ease-out shadow-[0_0_10px_rgba(168,85,247,0.3)]"
-                    style={{ width: `${extraOdePercent}%` }}
-                  />
-                  {/* Subtle Markers every 20% */}
-                  <div className="absolute inset-0 flex justify-between pointer-events-none px-[20%]">
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
-                    <div className="w-[1px] h-full bg-white/5" />
+                {simpleOdeCharge && (
+                  <div className="flex flex-row gap-2 w-[120px] shrink-0 animate-in fade-in slide-in-from-right-2 duration-300">
+                    <button 
+                      onClick={() => handleChargeOde(15)}
+                      className="flex-1 h-[38px] flex flex-col items-center justify-center bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-[11px] font-black text-purple-300 transition-all active:scale-95 no-drag shadow-lg"
+                    >
+                      <span className="text-[8px] opacity-60 leading-none mb-0.5">오드</span>
+                      +15
+                    </button>
+                    <button 
+                      onClick={() => handleChargeOde(40)}
+                      className="flex-1 h-[38px] flex flex-col items-center justify-center bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-[11px] font-black text-purple-300 transition-all active:scale-95 no-drag shadow-lg"
+                    >
+                      <span className="text-[8px] opacity-60 leading-none mb-0.5">오드</span>
+                      +40
+                    </button>
                   </div>
-                </div>
+                )}
               </div>
 
 
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="relative overflow-hidden my-1 select-none">
+                <div className="px-1 py-1">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={activeContentType}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ duration: 0.2 }}
+                      drag="x"
+                      dragDirectionLock
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0.2}
+                      onDragEnd={(_, info) => {
+                        const threshold = 50;
+                        if (info.offset.x > threshold) setActiveContentIdx(prev => (prev - 1 + 3) % 3);
+                        else if (info.offset.x < -threshold) setActiveContentIdx(prev => (prev + 1) % 3);
+                      }}
+                      className="flex w-full gap-2 cursor-grab active:cursor-grabbing no-drag-items"
+                    >
+                      {/* Left: Action Button (Slimmer) */}
+                      <button 
+                        onClick={() => handleAction(activeContentType)}
+                        className="w-[100px] h-[64px] bg-[#1a2133] border border-indigo-500/20 rounded-2xl flex flex-col items-center justify-center hover:bg-[#232d45] transition-all no-drag shadow-lg active:scale-95"
+                      >
+                        <div className="flex items-center gap-1 text-white font-black">
+                          <span className="text-[13px] uppercase tracking-tighter">{contentInfoMap?.[activeContentType].label}</span>
+                        </div>
+                        <span className="text-[17px] font-black text-red-500 tracking-tighter leading-none mt-1.5">
+                          -{selectedAccount?.membership ? config.costs.membership : config.costs.normal}
+                        </span>
+                      </button>
 
-                {Object.entries(config.tickets).map(([key, rule]) => (
+                      {/* Right: Integrated Status Board */}
+                      <div className="flex-1 bg-[#151b2b] border border-white/5 rounded-2xl flex items-stretch shadow-lg overflow-hidden">
+                        {/* Reward Section */}
+                        <div className="flex-1 flex flex-col items-center justify-center p-1.5 border-r border-white/5">
+                          <span className="text-[11px] font-black text-white uppercase tracking-tight mb-1">
+                            {activeContentType === 'sanctuary' ? '입장 횟수' : '보상 횟수'}
+                          </span>
+                          <div className="flex items-baseline gap-1">
+                            {editingTicketField === `${activeContentType}Basic` ? (
+                              <input 
+                                autoFocus
+                                type="number"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={handleUpdateTicketValue}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateTicketValue()}
+                                className="w-10 bg-indigo-500/10 border-b border-indigo-400 text-center text-[16px] font-black text-indigo-400 outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            ) : (
+                              <span 
+                                onClick={() => { setEditingTicketField(`${activeContentType}Basic`); setEditValue((contentInfoMap?.[activeContentType].rewards.basic || 0).toString()); }}
+                                className={cn("text-[18px] font-black leading-none cursor-pointer hover:text-white transition-colors", (contentInfoMap?.[activeContentType].rewards.basic || 0) > 0 ? "text-indigo-400" : "text-slate-400")}
+                              >
+                                {contentInfoMap?.[activeContentType].rewards.basic}
+                              </span>
+                            )}
+                            
+                            <span className="text-[12px] font-bold text-slate-200">+</span>
+                            
+                            {editingTicketField === `${activeContentType}Extra` ? (
+                              <input 
+                                autoFocus
+                                type="number"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={handleUpdateTicketValue}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateTicketValue()}
+                                className="w-10 bg-purple-500/10 border-b border-purple-400 text-center text-[14px] font-black text-purple-400 outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            ) : (
+                              <span 
+                                onClick={() => { setEditingTicketField(`${activeContentType}Extra`); setEditValue((contentInfoMap?.[activeContentType].rewards.extra || 0).toString()); }}
+                                className={cn("text-[16px] font-black leading-none cursor-pointer hover:text-white transition-colors", (contentInfoMap?.[activeContentType].rewards.extra || 0) > 0 ? "text-purple-400" : "text-slate-400")}
+                              >
+                                {contentInfoMap?.[activeContentType].rewards.extra}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* Boss Section */}
+                        <div className="flex-1 flex flex-col items-center justify-center p-1.5">
+                          <span className="text-[11px] font-black text-white uppercase tracking-tight mb-1">
+                            {activeContentType === 'sanctuary' ? '보상 횟수' : '보스 처치'}
+                          </span>
+                          <div className="flex items-baseline gap-1">
+                            {editingTicketField === (activeContentType === 'expedition' ? 'expeditionKillsBasic' : activeContentType === 'transcendence' ? 'transcendenceKillsBasic' : 'sanctuaryKillsBasic') ? (
+                              <input 
+                                autoFocus
+                                type="number"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={handleUpdateTicketValue}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateTicketValue()}
+                                className="w-10 bg-indigo-500/10 border-b border-indigo-400 text-center text-[16px] font-black text-indigo-400 outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            ) : (
+                              <span 
+                                onClick={() => { 
+                                  const field = activeContentType === 'expedition' ? 'expeditionKillsBasic' : activeContentType === 'transcendence' ? 'transcendenceKillsBasic' : 'sanctuaryKillsBasic';
+                                  setEditingTicketField(field); 
+                                  setEditValue((contentInfoMap?.[activeContentType].kills.basic || 0).toString()); 
+                                }}
+                                className={cn("text-[18px] font-black leading-none cursor-pointer hover:text-white transition-colors", (contentInfoMap?.[activeContentType].kills.basic || 0) > 0 ? "text-indigo-400" : "text-slate-400")}
+                              >
+                                {contentInfoMap?.[activeContentType].kills.basic}
+                              </span>
+                            )}
+                            
+                            <span className="text-[12px] font-bold text-slate-200">+</span>
+                            
+                            {editingTicketField === (activeContentType === 'expedition' ? 'expeditionKillsExtra' : activeContentType === 'transcendence' ? 'transcendenceKillsExtra' : 'sanctuaryKillsExtra') ? (
+                              <input 
+                                autoFocus
+                                type="number"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={handleUpdateTicketValue}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateTicketValue()}
+                                className="w-10 bg-purple-500/10 border-b border-purple-400 text-center text-[14px] font-black text-purple-400 outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            ) : (
+                              <span 
+                                onClick={() => { 
+                                  const field = activeContentType === 'expedition' ? 'expeditionKillsExtra' : activeContentType === 'transcendence' ? 'transcendenceKillsExtra' : 'sanctuaryKillsExtra';
+                                  setEditingTicketField(field); 
+                                  setEditValue((contentInfoMap?.[activeContentType].kills.extra || 0).toString()); 
+                                }}
+                                className={cn("text-[16px] font-black leading-none cursor-pointer hover:text-white transition-colors", (contentInfoMap?.[activeContentType].kills.extra || 0) > 0 ? "text-purple-400" : "text-slate-400")}
+                              >
+                                {contentInfoMap?.[activeContentType].kills.extra}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
 
-                  <button key={key} onClick={() => handleAction(key)} className="flex flex-col items-center justify-center py-2 bg-[#1a2133] border border-indigo-500/10 rounded-xl hover:bg-[#232d45] transition-all group">
-
-                    <span className="text-[10px] font-black text-slate-200 group-hover:text-white">{rule.label}</span>
-
-                    <span className="text-[13px] font-black text-red-400 mt-0.5">-{selectedAccount?.membership ? config.costs.membership : config.costs.normal}</span>
-
-                  </button>
-
-                ))}
-
+                {/* Swipe Navigation Dots */}
+                <div className="flex justify-center gap-2 mt-2 pb-1">
+                  {contentTypes.map((_, i) => (
+                    <button 
+                      key={i} 
+                      onClick={() => setActiveContentIdx(i)}
+                      className={cn(
+                        "w-2 h-2 rounded-full transition-all duration-300 no-drag cursor-pointer", 
+                        activeContentIdx === i 
+                          ? "bg-indigo-500 w-5 shadow-[0_0_8px_rgba(99,102,241,0.6)]" 
+                          : "bg-slate-700 hover:bg-slate-500"
+                      )} 
+                    />
+                  ))}
+                </div>
               </div>
-
-
 
               {!isCompact && (
                 <button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center justify-center gap-2 py-1.5 text-[11px] font-black text-indigo-300 hover:text-indigo-200 uppercase tracking-widest border-t border-white/5">
@@ -2270,28 +2393,18 @@ export default function HudPage() {
                 </button>
               )}
 
-
-
               {isExpanded && selectedChar && (
-
                 <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
-
-                  {/* 상세 티켓 현황 (초기 버전 제외) */}
-
-
-
-
                   <div className="flex flex-col gap-2 mb-2">
-
                     <div className="text-[9px] font-black text-indigo-300 uppercase tracking-widest px-1 text-left w-full">체크리스트 (클릭시 토글)</div>
-
                     <div className="grid grid-cols-1 gap-1">
                       {(() => {
                         const items = [
-                          { id: 'mission', name: '사명', max: 5, current: Number(selectedChar.mission) || 0, order: 0 },
+                          { id: 'mission', name: '사명', max: 5, current: Number(selectedAccount?.mission) || 0, order: 0 },
                           { id: 'corridor', name: '어비스 회랑', max: 6, current: Number(selectedChar.corridor) || 0, order: 1 },
-                          { id: 'dailyDungeon', name: '일일던전', max: 1, current: Number(selectedChar.dailyDungeon) || 0, order: 2 },
+                          { id: 'dailyDungeon', name: '일일던전', max: 1, current: Number(selectedAccount?.dailyDungeon) || 0, order: 2 },
                           { id: 'awakening', name: '각성', max: 3, current: Number(selectedChar.awakening) || 0, order: 3 },
+                          { id: 'nightmare', name: '악몽', max: 14, current: Number(selectedChar.nightmare) || 0, order: 4 },
                         ];
                         
                         return items
@@ -2308,7 +2421,13 @@ export default function HudPage() {
                               current={item.current}
                               max={item.max}
                               onClick={() => {
-                                updateCharacterData({ [item.id]: item.current >= item.max ? 0 : item.current + 1 });
+                                if (item.id === 'nightmare') {
+                                  updateCharacterData({ [item.id]: Math.min(14, (item.current || 0) + 1) });
+                                } else if (item.id === 'dailyDungeon' || item.id === 'mission') {
+                                  updateAccountData({ [item.id]: item.current >= item.max ? 0 : item.current + 1 });
+                                } else {
+                                  updateCharacterData({ [item.id]: item.current >= item.max ? 0 : item.current + 1 });
+                                }
                               }}
                             />
                           ));
@@ -2341,7 +2460,7 @@ export default function HudPage() {
 
             <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">설정</span>
 
-            <button onClick={() => setView("hud")} className="no-drag p-2 text-slate-500 hover:text-white"><X className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setView("hud")} className="no-drag p-2 text-slate-300 hover:text-white"><X className="w-3.5 h-3.5" /></button>
 
           </div>
 
@@ -2349,7 +2468,7 @@ export default function HudPage() {
 
             <div className="flex flex-col gap-2.5">
 
-              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
 
                 <Key className="w-3 h-3" /> 동기화 키 (Sync Key)
 
@@ -2393,17 +2512,7 @@ export default function HudPage() {
 
                   </button>
 
-                  <div className="flex justify-between items-center px-1">
 
-                    <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1.5">
-
-                      <div className={cn("w-1.5 h-1.5 rounded-full", configStatus === "LOADED" || configStatus === "SAVED" ? "bg-indigo-500" : "bg-slate-700")} />
-
-                      Persistence: <span className={cn(configStatus === "LOADED" || configStatus === "SAVED" ? "text-indigo-400" : "text-slate-400")}>{configStatus}</span>
-
-                    </div>
-
-                  </div>
 
                   <div className="relative group w-full">
 
@@ -2423,7 +2532,7 @@ export default function HudPage() {
 
                       onClick={(e) => { e.stopPropagation(); setShowBrowserSelect(true); }}
 
-                      className="no-drag absolute top-1/2 right-1.5 -translate-y-1/2 p-1.5 text-slate-500 hover:text-white bg-transparent rounded hover:bg-white/10"
+                      className="no-drag absolute top-1/2 right-1.5 -translate-y-1/2 p-1.5 text-slate-300 hover:text-white bg-transparent rounded hover:bg-white/10"
 
                       title="기본 브라우저 변경"
 
@@ -2456,36 +2565,20 @@ export default function HudPage() {
               <div className="flex flex-col gap-2">
 
                 <div className="flex items-center justify-between">
-
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
                     <Globe className="w-3 h-3" /> 지능형 노출 제어
-
                   </span>
-
                   <button 
-
                     onClick={() => {
-
                       const next = !intelligentHide;
-
                       setIntelligentHide(next);
-
                       localStorage.setItem('aion_intelligent_hide', next.toString());
-
                     }}
-
                     className={cn("no-drag w-8 h-4 rounded-full transition-colors relative", intelligentHide ? "bg-indigo-500" : "bg-slate-700")}
-
                   >
-
                     <div className={cn("absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all", intelligentHide ? "left-[18px]" : "left-0.5")} />
-
                   </button>
-
                 </div>
-
-                <p className="text-[8px] text-slate-600 font-bold px-1 leading-relaxed">아이온2 창이 활성화된 상태에서만 HUD를 표시합니다.</p>
 
               </div>
 
@@ -2494,43 +2587,27 @@ export default function HudPage() {
               <div className="flex flex-col gap-2">
 
                 <div className="flex items-center justify-between">
-
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
                     <Scan className="w-3 h-3" /> 컴팩트 모드
-
                   </span>
-
                   <button 
-
                     onClick={() => {
-
                       const next = !isMinimal;
-
                       setIsMinimal(next);
-
                       localStorage.setItem('aion_is_minimal', next.toString());
-
                     }}
-
                     className={cn("no-drag w-8 h-4 rounded-full transition-colors relative", isMinimal ? "bg-indigo-500" : "bg-slate-700")}
-
                   >
-
                     <div className={cn("absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all", isMinimal ? "left-[18px]" : "left-0.5")} />
-
                   </button>
-
                 </div>
-
-                <p className="text-[8px] text-slate-600 font-bold px-1 leading-relaxed">배경을 숨기고 마우스 오버 시에만 UI를 나타냅니다.</p>
                 
                 {isMinimal && (
                   <div className="mt-2 space-y-2 px-1 animate-in slide-in-from-top-2 duration-300">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-1.5">
-                        <Layers className="w-3 h-3 text-slate-500" />
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">투명도</span>
+                        <Layers className="w-3 h-3 text-slate-300" />
+                        <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">투명도</span>
                       </div>
                       <span className="text-[10px] font-mono text-indigo-400 font-bold">{opacity}%</span>
                     </div>
@@ -2540,11 +2617,7 @@ export default function HudPage() {
                       onChange={(e) => {
                         const val = parseInt(e.target.value);
                         setOpacity(val);
-                        // 즉시 저장하여 반영
-                        (window as any).api?.invoke('save-config', {
-                          syncKey, intelligentHide, isMinimal, opacity: val, defaultBrowser, mapTemplates, loadingTemplate, ocrRegions,
-                          hotkeys
-                        });
+                        // saveAllConfigs (useEffect)에 의해 1초 뒤 자동 저장됨
                       }}
                       className="no-drag w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                     />
@@ -2552,18 +2625,55 @@ export default function HudPage() {
                 )}
               </div>
 
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Zap className="w-3 h-3" /> 간편 오드 충전
+                  </span>
+                  <button 
+                    onClick={() => {
+                      const next = !simpleOdeCharge;
+                      setSimpleOdeCharge(next);
+                      localStorage.setItem('aion_simple_ode_charge', next.toString());
+                    }}
+                    className={cn("no-drag w-8 h-4 rounded-full transition-colors relative", simpleOdeCharge ? "bg-indigo-500" : "bg-slate-700")}
+                  >
+                    <div className={cn("absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all", simpleOdeCharge ? "left-[18px]" : "left-0.5")} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Ticket className="w-3 h-3" /> 티켓 유효성 체크
+                  </span>
+                  <button 
+                    onClick={() => {
+                      const next = !ticketValidation;
+                      setTicketValidation(next);
+                      localStorage.setItem('aion_ticket_validation', next.toString());
+                    }}
+                    className={cn("no-drag w-8 h-4 rounded-full transition-colors relative", ticketValidation ? "bg-indigo-500" : "bg-slate-700")}
+                  >
+                    <div className={cn("absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all", ticketValidation ? "left-[18px]" : "left-0.5")} />
+                  </button>
+                </div>
+              </div>
+
+
               {/* --- [NEW] Hotkey Settings --- */}
               <div className="h-[1px] bg-white/5" />
               <div className="flex flex-col gap-3">
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                  <Key className="w-3 h-3" /> 단축키 설정 (Global Hotkeys)
+                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+                  <Key className="w-3 h-3" /> 단축키 설정
                 </span>
                 
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between bg-black/30 p-2.5 rounded-xl border border-white/5">
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-slate-300">HUD 표시/숨김</span>
-                      <span className="text-[8px] text-slate-500 font-medium">전체 오버레이 토글</span>
+                      <span className="text-[8px] text-slate-300 font-medium">전체 오버레이 토글</span>
                     </div>
                     <button 
                       onClick={() => setRecordingKey(recordingKey === 'toggleHud' ? null : 'toggleHud')}
@@ -2572,7 +2682,7 @@ export default function HudPage() {
                         "no-drag px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all border",
                         recordingKey === 'toggleHud' 
                           ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 animate-pulse" 
-                          : "bg-slate-800 border-white/10 text-slate-400 hover:text-white"
+                          : "bg-slate-800 border-white/10 text-slate-200 hover:text-white"
                       )}
                     >
                       {recordingKey === 'toggleHud' ? '입력 대기중...' : hotkeys.toggleHud}
@@ -2582,7 +2692,7 @@ export default function HudPage() {
                   <div className="flex items-center justify-between bg-black/30 p-2.5 rounded-xl border border-white/5">
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-slate-300">압축 모드 토글</span>
-                      <span className="text-[8px] text-slate-500 font-medium">HUD 사이즈 축소 토글</span>
+                      <span className="text-[8px] text-slate-300 font-medium">HUD 사이즈 축소 토글</span>
                     </div>
                     <button 
                       onClick={() => setRecordingKey(recordingKey === 'toggleCompact' ? null : 'toggleCompact')}
@@ -2591,7 +2701,7 @@ export default function HudPage() {
                         "no-drag px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all border",
                         recordingKey === 'toggleCompact' 
                           ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 animate-pulse" 
-                          : "bg-slate-800 border-white/10 text-slate-400 hover:text-white"
+                          : "bg-slate-800 border-white/10 text-slate-200 hover:text-white"
                       )}
                     >
                       {recordingKey === 'toggleCompact' ? '입력 대기중...' : hotkeys.toggleCompact}
@@ -2601,7 +2711,7 @@ export default function HudPage() {
                   <div className="flex items-center justify-between bg-black/30 p-2.5 rounded-xl border border-white/5">
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-slate-300">상세정보 펼치기/닫기</span>
-                      <span className="text-[8px] text-slate-500 font-medium">하단 상세 정보 영역 토글</span>
+                      <span className="text-[8px] text-slate-300 font-medium">하단 상세 정보 영역 토글</span>
                     </div>
                     <button 
                       onClick={() => setRecordingKey(recordingKey === 'toggleDetails' ? null : 'toggleDetails')}
@@ -2610,7 +2720,7 @@ export default function HudPage() {
                         "no-drag px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all border",
                         recordingKey === 'toggleDetails' 
                           ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 animate-pulse" 
-                          : "bg-slate-800 border-white/10 text-slate-400 hover:text-white"
+                          : "bg-slate-800 border-white/10 text-slate-200 hover:text-white"
                       )}
                     >
                       {recordingKey === 'toggleDetails' ? '입력 대기중...' : hotkeys.toggleDetails}
@@ -2624,7 +2734,7 @@ export default function HudPage() {
                     </div>
                   )}
                   
-                  <p className="text-[8px] text-slate-600 font-medium px-1 italic">
+                  <p className="text-[8px] text-slate-400 font-medium px-1 italic">
                     * 수식키(Shift, Ctrl, Alt)를 포함한 조합을 권장합니다.
                   </p>
                 </div>
@@ -2636,7 +2746,7 @@ export default function HudPage() {
 
             
 
-            <button onClick={() => setView("hud")} className="py-2.5 text-[10px] font-black text-slate-500 hover:text-indigo-400 uppercase tracking-widest border-t border-white/5 mt-2">닫기</button>
+            <button onClick={() => setView("hud")} className="py-2.5 text-[10px] font-black text-slate-300 hover:text-indigo-400 uppercase tracking-widest border-t border-white/5 mt-2">닫기</button>
 
           </div>
 
@@ -2652,7 +2762,7 @@ export default function HudPage() {
 
                 <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">실행할 브라우저 선택</span>
 
-                <button onClick={() => setShowBrowserSelect(false)} className="no-drag p-1 text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+                <button onClick={() => setShowBrowserSelect(false)} className="no-drag p-1 text-slate-300 hover:text-white"><X className="w-4 h-4" /></button>
 
               </div>
 
@@ -2690,7 +2800,7 @@ export default function HudPage() {
 
                 <button onClick={() => handleSelectBrowser('default')} className="no-drag flex items-center justify-between p-3.5 bg-slate-800/50 rounded-xl hover:bg-slate-700/50 border border-white/5 transition-all group">
 
-                  <span className="text-[11px] font-bold text-slate-400 group-hover:text-white transition-colors">시스템 기본 브라우저</span>
+                  <span className="text-[11px] font-bold text-slate-200 group-hover:text-white transition-colors">시스템 기본 브라우저</span>
 
                   {defaultBrowser === 'default' && <Check className="w-4 h-4 text-slate-300" />}
 
@@ -2714,9 +2824,9 @@ export default function HudPage() {
           <div className="drag-region flex items-center justify-between px-4 min-h-[42px] bg-[#0b0f1a] border-b border-white/5 shrink-0">
             <div className="flex items-center gap-2">
               <Bell className="w-3 h-3 text-indigo-400" />
-              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">슈고 알리미 제어</span>
+              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">알리미 제어</span>
             </div>
-            <button onClick={() => setView("hud")} className="no-drag p-2 text-slate-500 hover:text-white transition-colors">
+            <button onClick={() => setView("hud")} className="no-drag p-2 text-slate-300 hover:text-white transition-colors">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -2725,10 +2835,7 @@ export default function HudPage() {
             {/* 1. 마스터 스위치 & 볼륨 */}
             <section className="space-y-4">
               <div className="flex items-center justify-between p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
-                <div className="flex flex-col">
-                  <span className="text-[11px] font-bold text-indigo-100">알리미 마스터 스위치</span>
-                  <span className="text-[9px] text-indigo-300/60 font-medium">전체 알람 활성화 여부</span>
-                </div>
+                <span className="text-[11px] font-bold text-indigo-100">알리미 마스터 스위치</span>
                 <button 
                   onClick={() => updateAlerterConfig({ enabled: !alerterConfig.enabled })}
                   className={cn(
@@ -2745,7 +2852,7 @@ export default function HudPage() {
 
               <div className="space-y-2 px-1">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-slate-400">알람 볼륨</span>
+                  <span className="text-[10px] font-bold text-slate-200">알람 볼륨</span>
                   <span className="text-[10px] font-mono text-indigo-400">{alerterConfig.volume}%</span>
                 </div>
                 <input 
@@ -2759,14 +2866,12 @@ export default function HudPage() {
 
             {/* 2. 콘텐츠 필터 */}
             <section className="space-y-3">
-              <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">콘텐츠 알림 설정</h3>
+              <h3 className="text-[9px] font-black text-slate-300 uppercase tracking-widest px-1">콘텐츠 알림 설정</h3>
               
               <div className="grid grid-cols-1 gap-2">
                 {[
                   { id: 'riftEnabled', label: '시공의 균열', icon: Globe, color: 'text-blue-400' },
                   { id: 'nahmaEnabled', label: '어비스 나흐마', icon: AlertCircle, color: 'text-red-400' },
-                  { id: 'shugoEnabled', label: '슈고페스타', icon: Plus, color: 'text-amber-400' },
-                  { id: 'invasionEnabled', label: '차원 침공', icon: Scan, color: 'text-purple-400' },
                 ].map((item) => (
                   <button 
                     key={item.id}
@@ -2789,66 +2894,25 @@ export default function HudPage() {
                 ))}
               </div>
 
-              {/* 상세 옵션 */}
-              {alerterConfig.shugoEnabled && (
-                <div className="mt-3 p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <span className="text-[9px] font-bold text-amber-500/70 uppercase">슈고 상세 필터</span>
-                  <div className="flex gap-2">
-                    {['shugo15Enabled', 'shugo45Enabled'].map((fid) => (
-                      <button 
-                        key={fid}
-                        onClick={() => updateAlerterConfig({ [fid]: !alerterConfig[fid as keyof AlerterConfig] })}
-                        className={cn(
-                          "flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all",
-                          alerterConfig[fid as keyof AlerterConfig] 
-                            ? "bg-amber-500/20 border-amber-500/30 text-amber-200" 
-                            : "bg-black/40 border-white/5 text-slate-600"
-                        )}
-                      >
-                        {fid.includes('15') ? '15분 타임' : '45분 타임'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {alerterConfig.nahmaEnabled && (
-                <div className="mt-2 p-3 bg-red-500/5 border border-red-500/10 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-red-200">나흐마 5초 카운트다운</span>
-                    <span className="text-[9px] text-red-400/60">등장 직전 카운트 음성 재생</span>
-                  </div>
-                  <button 
-                    onClick={() => updateAlerterConfig({ nahmaCountdown: !alerterConfig.nahmaCountdown })}
-                    className={cn(
-                      "w-8 h-4 rounded-full transition-all relative",
-                      alerterConfig.nahmaCountdown ? "bg-red-500" : "bg-slate-700"
-                    )}
-                  >
-                    <div className={cn(
-                      "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
-                      alerterConfig.nahmaCountdown ? "left-4.5" : "left-0.5"
-                    )} />
-                  </button>
-                </div>
-              )}
+
             </section>
 
             {/* 3. 시간 보정 & 테스트 */}
             <section className="space-y-3">
-              <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">시스템 도구</h3>
+              <h3 className="text-[9px] font-black text-slate-300 uppercase tracking-widest px-1">시스템 도구</h3>
               
               <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-bold text-slate-300">서버 시간 보정</span>
-                    <span className="text-[9px] text-slate-500 font-mono">
+                    <span className="text-[9px] text-slate-300 font-mono">
                       현재 보정치: {alerterConfig.timeOffset > 0 ? '+' : ''}{alerterConfig.timeOffset.toFixed(1)}s
                     </span>
                   </div>
                   <button 
                     onClick={() => updateAlerterConfig({ timeOffset: 0 })}
-                    className="p-1.5 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-all"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
@@ -2858,7 +2922,7 @@ export default function HudPage() {
                     <button 
                       key={val}
                       onClick={() => updateAlerterConfig({ timeOffset: Number((alerterConfig.timeOffset + val).toFixed(1)) })}
-                      className="py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-mono text-slate-400 hover:text-white transition-all border border-white/5"
+                      className="py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-mono text-slate-200 hover:text-white transition-all border border-white/5"
                     >
                       {val > 0 ? '+' : ''}{val}
                     </button>
@@ -2879,7 +2943,7 @@ export default function HudPage() {
           </div>
 
           <div className="p-3 bg-[#0b0f1a] border-t border-white/5 flex items-center justify-center shrink-0">
-             <span className="text-[9px] text-slate-600 font-medium">AION2 Shugo Alerter v271.0 Sync</span>
+             <span className="text-[9px] text-slate-400 font-medium">AION2 HUD Dashboard Sync</span>
           </div>
         </div>
       )}
@@ -2892,6 +2956,21 @@ export default function HudPage() {
           </div>
         </div>
       )}
+
+      {toast.show && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[9999] animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-none">
+          <div className={cn(
+            "backdrop-blur-md px-5 py-2.5 rounded-2xl border shadow-2xl flex items-center gap-2.5",
+            toast.type === 'error' ? "bg-red-500/90 border-red-400/50" : "bg-indigo-500/90 border-indigo-400/50"
+          )}>
+            {toast.type === 'error' ? <AlertCircle className="w-4 h-4 text-white" /> : <Info className="w-4 h-4 text-white" />}
+            <span className="text-[11px] font-bold text-white tracking-tight">
+              {toast.message}
+            </span>
+          </div>
+        </div>
+      )}
+
     </main>
 
   );
@@ -2920,14 +2999,11 @@ function TicketRow({ label, base, extra, max, hasExtra }: any) {
 
       <div className="flex justify-between items-center z-10">
 
-        <span className={cn("text-[12px] font-black", isEmpty ? "text-slate-400" : "text-white")}>{label}</span>
+        <span className={cn("text-[12px] font-black", isEmpty ? "text-slate-200" : "text-white")}>{label}</span>
 
         <div className="flex items-baseline gap-1">
-
-          <span className={cn("text-lg font-black tracking-tighter leading-none", isEmpty ? "text-slate-500" : "text-white")}>{total}</span>
-
-          <span className={cn("text-[10px] font-bold", isEmpty ? "text-slate-600" : "text-slate-400")}>장 남음</span>
-
+          <span className={cn("text-xl font-black tracking-tighter leading-none shadow-sm", isEmpty ? "text-slate-400" : "text-white")}>{total}</span>
+          <span className={cn("text-[10px] font-bold", isEmpty ? "text-slate-500" : "text-slate-100")}>장 남음</span>
         </div>
 
       </div>
@@ -2942,9 +3018,9 @@ function TicketRow({ label, base, extra, max, hasExtra }: any) {
 
           <span className="text-[9px] font-bold text-slate-300">기본</span>
 
-          <span className={cn("text-[10px] font-black", base > 0 ? "text-indigo-300" : "text-slate-500")}>{base || 0}</span>
+          <span className={cn("text-[10px] font-black", base > 0 ? "text-indigo-300" : "text-slate-300")}>{base || 0}</span>
 
-          <span className="text-[8px] text-slate-500 font-bold ml-0.5">/ {max}</span>
+          <span className="text-[8px] text-slate-300 font-bold ml-0.5">/ {max}</span>
 
         </div>
 
@@ -2958,7 +3034,7 @@ function TicketRow({ label, base, extra, max, hasExtra }: any) {
 
             <span className="text-[9px] font-bold text-slate-300">충전</span>
 
-            <span className={cn("text-[10px] font-black", extra > 0 ? "text-amber-300" : "text-slate-500")}>{extra || 0}</span>
+            <span className={cn("text-[10px] font-black", extra > 0 ? "text-amber-300" : "text-slate-300")}>{extra || 0}</span>
 
           </div>
 
@@ -2998,19 +3074,19 @@ function CheckRow({ name, done, current, max, onClick }: any) {
 
         ) : (
 
-          <Circle className="w-3.5 h-3.5 text-slate-600" fill="none" />
+          <Circle className="w-3.5 h-3.5 text-slate-400" fill="none" />
 
         )}
 
-        <span className={cn("text-[11px] font-black transition-all", done ? "text-slate-500 line-through" : "text-slate-100")}>{name}</span>
+        <span className={cn("text-[11px] font-black transition-all", done ? "text-slate-300 line-through" : "text-slate-100")}>{name}</span>
 
       </div>
 
       <div className="flex items-baseline gap-1">
 
-        <span className={cn("text-[11px] font-black italic transition-colors", done ? "text-slate-500" : "text-indigo-300")}>{current}</span>
+        <span className={cn("text-[11px] font-black italic transition-colors", done ? "text-slate-300" : "text-indigo-300")}>{current}</span>
 
-        <span className="text-[9px] font-black text-slate-500">/ {max}</span>
+        <span className="text-[9px] font-black text-slate-300">/ {max}</span>
 
       </div>
 

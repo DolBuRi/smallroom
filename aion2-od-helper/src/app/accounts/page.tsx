@@ -162,9 +162,9 @@ function AccountCard({ account, onUpdate, onDelete }: { account: any, onUpdate: 
         </div>
       </div>
 
-      {/* Expedition/Transcendence Counts */}
+      {/* Expedition/Transcendence/DailyDungeon Counts */}
       <div className="space-y-4">
-        <span className="text-[10px] font-black text-slate-700 dark:text-slate-400 px-1 uppercase tracking-tight">이번 주 횟수</span>
+        <span className="text-[10px] font-black text-slate-700 dark:text-slate-400 px-1 uppercase tracking-tight">이번 주/일 횟수</span>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 px-1">원정 / 경고 63+</span>
@@ -184,6 +184,17 @@ function AccountCard({ account, onUpdate, onDelete }: { account: any, onUpdate: 
               className="w-full bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-xl px-4 py-2 text-[13px] font-black text-slate-900 dark:text-white focus:outline-none focus:border-slate-200 dark:focus:border-slate-600"
             />
           </div>
+        </div>
+        <div className="space-y-2">
+          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 px-1">일일던전 (0 또는 1)</span>
+          <input 
+            type="number" 
+            min="0"
+            max="1"
+            value={account.dailyDungeon || 0}
+            onChange={(e) => onUpdate({ dailyDungeon: parseInt(e.target.value) || 0 })}
+            className="w-full bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-xl px-4 py-2 text-[13px] font-black text-slate-900 dark:text-white focus:outline-none focus:border-slate-200 dark:focus:border-slate-600"
+          />
         </div>
       </div>
 
